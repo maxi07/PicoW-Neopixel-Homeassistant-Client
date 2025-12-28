@@ -1,0 +1,18 @@
+{
+    "wifi": {
+        "ssid": "YOUR_WIFI_SSID",
+        "password": "YOUR_WIFI_PASSWORD"
+    },
+    "device": {
+        "name": "PicoW NeoPixel",
+        "id": "picow_neopixel_001"
+    },
+    "neopixel": {
+        "pin": 28,
+        "num_leds": 64,
+        "brightness": 100
+    },
+    "api": {
+        "port": 80
+    }
+}

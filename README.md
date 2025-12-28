@@ -1,0 +1,265 @@
+# PicoW NeoPixel Controller
+
+MicroPython-based NeoPixel LED controller for Raspberry Pi Pico W with REST API and Home Assistant integration support.
+
+## Features
+
+- **Non-blocking Animation Engine**: All effects run without blocking command reception
+- **REST API**: Full HTTP REST API for remote control
+- **Auto-reconnect**: Automatic WiFi reconnection on connection loss
+- **Status Indicators**: Visual feedback for boot, WiFi connecting, errors, and ready states
+- **Multiple Effects**: 8 built-in LED effects (rainbow, fade, chase, breathing, twinkle, scanner, strobe, static)
+- **Logging**: Comprehensive logging system with file output for warnings and errors
+- **Easy Configuration**: JSON-based configuration for WiFi and hardware settings
+
+## Hardware Requirements
+
+- Raspberry Pi Pico W
+- WS2812B NeoPixel LED strip (or compatible)
+- 5V power supply (appropriate for your LED strip)
+- Connecting wires
+
+## Wiring
+
+Connect your NeoPixel strip to the Pico W:
+
+- **LED Data**: GPIO 28 (configurable in config.json)
+- **LED 5V**: External 5V power supply
+- **LED GND**: Common ground with Pico W
+- **Pico W**: USB power or 5V via VSYS
+
+**Important**: For strips with more than ~10 LEDs, use an external 5V power supply. Connect grounds together.
+
+## Installation
+
+### 1. Flash MicroPython
+
+1. Download the latest MicroPython firmware for Pico W from [micropython.org](https://micropython.org/download/rp2-pico-w/)
+2. Hold the BOOTSEL button on your Pico W and connect it via USB
+3. Copy the .uf2 file to the RPI-RP2 drive that appears
+4. The Pico W will reboot with MicroPython installed
+
+### 2. Upload Files
+
+Upload all Python files to your Pico W using one of these methods:
+
+**Option A: Using Thonny IDE**
+1. Install [Thonny](https://thonny.org/)
+2. Configure Thonny to use your Pico W (Tools → Options → Interpreter)
+3. Open each .py file and save it to the Pico W
+4. Upload config.json and edit it with your settings
+
+**Option B: Using mpremote**
+```bash
+pip install mpremote
+mpremote connect /dev/ttyACM0 fs cp *.py :
+mpremote connect /dev/ttyACM0 fs cp config.json :
+```
+
+**Option C: Using ampy**
+```bash
+pip install adafruit-ampy
+ampy --port /dev/ttyACM0 put main.py
+ampy --port /dev/ttyACM0 put config_loader.py
+ampy --port /dev/ttyACM0 put logger.py
+ampy --port /dev/ttyACM0 put network_manager.py
+ampy --port /dev/ttyACM0 put neopixel_controller.py
+ampy --port /dev/ttyACM0 put api_server.py
+ampy --port /dev/ttyACM0 put mdns_service.py
+ampy --port /dev/ttyACM0 put config.json
+```
+
+### 3. Configure
+
+Edit `config.json` on the Pico W with your settings:
+
+```json
+{
+    "wifi": {
+        "ssid": "YOUR_WIFI_SSID",
+        "password": "YOUR_WIFI_PASSWORD"
+    },
+    "device": {
+        "name": "PicoW NeoPixel",
+        "id": "picow_neopixel_001"
+    },
+    "neopixel": {
+        "pin": 28,
+        "num_leds": 64,
+        "brightness": 100
+    },
+    "api": {
+        "port": 80
+    }
+}
+```
+
+**Configuration Options:**
+- `wifi.ssid`: Your WiFi network name
+- `wifi.password`: Your WiFi password
+- `device.name`: Friendly name for the device
+- `device.id`: Unique identifier (use different IDs for multiple devices)
+- `neopixel.pin`: GPIO pin number for LED data (default: 28)
+- `neopixel.num_leds`: Number of LEDs in your strip (default: 64)
+- `neopixel.brightness`: Default brightness 0-100 (default: 100)
+- `api.port`: HTTP API port (default: 80)
+
+### 4. Run
+
+The controller starts automatically on boot. To test manually:
+
+```python
+import main
+```
+
+## Status LED Indicators
+
+The LED strip shows different patterns during startup:
+
+- **Rainbow Sweep**: Boot animation
+- **Pulsing Blue**: Connecting to WiFi
+- **Solid Red**: Error (check logs.txt)
+- **Solid White**: Successfully connected and ready
+- **Off**: Waiting for commands
+
+## API Endpoints
+
+### GET /
+Returns device information and available endpoints.
+
+### GET /state
+Returns current LED state:
+```json
+{
+    "is_on": true,
+    "effect": "rainbow",
+    "brightness": 100,
+    "color": {"r": 255, "g": 0, "b": 0}
+}
+```
+
+### GET /info
+Returns device capabilities and configuration:
+```json
+{
+    "device": {
+        "name": "PicoW NeoPixel",
+        "id": "picow_neopixel_001",
+        "ip": "192.168.1.100",
+        "mac": "aa:bb:cc:dd:ee:ff"
+    },
+    "capabilities": {
+        "effects": ["static", "rainbow", "fade", "chase", "breathing", "twinkle", "scanner", "strobe"],
+        "num_leds": 64,
+        "supports_rgb": true,
+        "supports_brightness": true
+    }
+}
+```
+
+### POST /control
+Control the LED strip. Request body examples:
+
+**Turn on/off:**
+```json
+{"power": "on"}
+{"power": "off"}
+```
+
+**Set static color:**
+```json
+{
+    "power": "on",
+    "color": {"r": 255, "g": 0, "b": 0}
+}
+```
+
+**Set brightness:**
+```json
+{
+    "brightness": 50
+}
+```
+
+**Start effect:**
+```json
+{
+    "power": "on",
+    "effect": "rainbow",
+    "speed": 50
+}
+```
+
+**Effect with color:**
+```json
+{
+    "power": "on",
+    "effect": "chase",
+    "color": {"r": 0, "g": 255, "b": 0},
+    "speed": 75
+}
+```
+
+## Available Effects
+
+- `static`: Solid color
+- `rainbow`: Rainbow cycle animation
+- `fade`: Smooth color fade through spectrum
+- `chase`: Running light effect
+- `breathing`: Pulsing brightness effect
+- `twinkle`: Random sparkle effect
+- `scanner`: Knight Rider style scanner
+- `strobe`: Strobe light effect
+
+Effect speed: 1-100 (higher = faster)
+
+## Logging
+
+Logs are written to both console and `logs.txt` file on the Pico W.
+
+- Console: All messages (DEBUG, INFO, WARNING, ERROR)
+- File: Only WARNING and ERROR messages
+
+View logs via serial connection or read logs.txt from the device.
+
+## Troubleshooting
+
+### LEDs show solid red
+- Error during startup
+- Check `logs.txt` for details
+- Common issues: WiFi credentials incorrect, hardware not connected
+
+### Can't connect to WiFi
+- Verify SSID and password in config.json
+- Ensure 2.4GHz WiFi (Pico W doesn't support 5GHz)
+- Check WiFi signal strength
+
+### LEDs not responding
+- Verify GPIO pin in config.json matches your wiring
+- Check power supply is adequate
+- Ensure data line is connected properly
+
+### API not accessible
+- Check device IP address from logs or router
+- Verify firewall settings
+- Try accessing http://DEVICE_IP/ from browser
+
+### Memory errors
+- Reduce number of LEDs if experiencing crashes
+- The controller performs periodic garbage collection
+
+## Home Assistant Integration
+
+This controller is designed to work with the PicoW NeoPixel Home Assistant Integration. The integration will automatically discover devices on your network and allow control through the Home Assistant UI.
+
+## License
+
+MIT License - feel free to modify and use for your projects.
+
+## Author
+
+Maximilian Krause
+
+## Version
+
+1.0
