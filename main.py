@@ -33,9 +33,9 @@ def main():
 
         # Initialize NeoPixel controller
         logger.info("Initializing NeoPixel controller...")
-        pin = config.get("neopixel", "pin", 28)
-        num_leds = config.get("neopixel", "num_leds", 64)
-        brightness = config.get("neopixel", "brightness", 100)
+        pin = int(config.get("neopixel", "pin") or 28)
+        num_leds = int(config.get("neopixel", "num_leds") or 64)
+        brightness = int(config.get("neopixel", "brightness") or 100)
 
         neopixel = NeoPixelController(pin, num_leds, brightness)
 
@@ -75,7 +75,7 @@ def main():
 
         # Initialize API server
         logger.info("Starting API server...")
-        api_port = config.get("api", "port", 80)
+        api_port = int(config.get("api", "port") or 80)
         api_server = APIServer(neopixel, device_info, api_port)
 
         if not api_server.start():

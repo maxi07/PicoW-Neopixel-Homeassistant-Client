@@ -57,7 +57,7 @@ class Config:
             "api": {"port": 80}
         }
 
-    def get(self, section, key, default=None):
+    def get(self, section: str, key: str, default=None):
         """Get configuration value"""
         try:
             return self.config.get(section, {}).get(key, default)
