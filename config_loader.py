@@ -7,12 +7,13 @@ from logger import Logger
 
 logger = Logger("Config")
 
+
 class Config:
     def __init__(self, config_file="config.json"):
         self.config_file = config_file
         self.config = {}
         self.load()
-    
+
     def load(self):
         """Load configuration from JSON file"""
         try:
@@ -25,7 +26,7 @@ class Config:
             logger.error("Failed to load config: {}".format(e))
             self._set_defaults()
             return False
-    
+
     def _validate(self):
         """Validate required configuration fields"""
         required_fields = {
@@ -34,7 +35,7 @@ class Config:
             "neopixel": ["pin", "num_leds"],
             "api": ["port"]
         }
-        
+
         for section, fields in required_fields.items():
             if section not in self.config:
                 logger.warning("Missing config section: {}".format(section))
@@ -43,9 +44,9 @@ class Config:
                 if field not in self.config[section]:
                     logger.warning("Missing config field: {}.{}".format(section, field))
                     return False
-        
+
         return True
-    
+
     def _set_defaults(self):
         """Set default configuration values"""
         logger.warning("Using default configuration")
@@ -55,14 +56,14 @@ class Config:
             "neopixel": {"pin": 28, "num_leds": 64, "brightness": 100},
             "api": {"port": 80}
         }
-    
+
     def get(self, section, key, default=None):
         """Get configuration value"""
         try:
             return self.config.get(section, {}).get(key, default)
-        except:
+        except Exception:
             return default
-    
+
     def get_section(self, section):
         """Get entire configuration section"""
         return self.config.get(section, {})

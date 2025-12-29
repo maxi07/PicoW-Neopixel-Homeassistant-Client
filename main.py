@@ -13,53 +13,54 @@ from api_server import APIServer
 # Initialize logger
 logger = Logger("Main")
 
+
 def main():
     """Main application entry point"""
     logger.info("="*50)
     logger.info("PicoW NeoPixel Controller Starting")
     logger.info("Version: 1.0")
     logger.info("="*50)
-    
+
     # Initialize components
     neopixel = None
     network_mgr = None
     api_server = None
-    
+
     try:
         # Load configuration
         logger.info("Loading configuration...")
         config = Config()
-        
+
         # Initialize NeoPixel controller
         logger.info("Initializing NeoPixel controller...")
         pin = config.get("neopixel", "pin", 28)
         num_leds = config.get("neopixel", "num_leds", 64)
         brightness = config.get("neopixel", "brightness", 100)
-        
+
         neopixel = NeoPixelController(pin, num_leds, brightness)
-        
+
         # Show boot animation
         logger.info("Running boot animation...")
         neopixel.show_status("boot")
-        
+
         # Initialize network manager
         logger.info("Initializing network...")
         ssid = config.get("wifi", "ssid", "")
         password = config.get("wifi", "password", "")
-        
+
         if not ssid:
             logger.error("WiFi SSID not configured!")
             neopixel.show_status("error")
             return
-        
+
         network_mgr = NetworkManager(ssid, password)
-        
+
         # Connect to WiFi
         if not network_mgr.connect(neopixel):
             logger.error("Failed to connect to WiFi")
             neopixel.show_status("error")
             return
-        
+
         # Get device info
         device_info = {
             "name": config.get("device", "name", "PicoW NeoPixel"),
@@ -67,40 +68,40 @@ def main():
             "ip": network_mgr.get_ip(),
             "mac": network_mgr.get_mac()
         }
-        
+
         logger.info("Device: {} ({})".format(device_info["name"], device_info["id"]))
         logger.info("IP Address: {}".format(device_info["ip"]))
         logger.info("MAC Address: {}".format(device_info["mac"]))
-        
+
         # Initialize API server
         logger.info("Starting API server...")
         api_port = config.get("api", "port", 80)
         api_server = APIServer(neopixel, device_info, api_port)
-        
+
         if not api_server.start():
             logger.error("Failed to start API server")
             neopixel.show_status("error")
             return
-        
+
         logger.info("="*50)
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
-        
+
         # Main event loop
         loop_counter = 0
         last_gc = time.ticks_ms()
-        
+
         while True:
             try:
                 # Update NeoPixel animations (non-blocking)
                 neopixel.update()
-                
+
                 # Handle API requests (non-blocking)
                 api_server.handle_requests()
-                
+
                 # Check network connection (periodic)
                 network_mgr.check_connection()
-                
+
                 # Periodic garbage collection (every 10 seconds)
                 current_time = time.ticks_ms()
                 if time.ticks_diff(current_time, last_gc) > 10000:
@@ -108,50 +109,51 @@ def main():
                     last_gc = current_time
                     if loop_counter % 100 == 0:
                         logger.debug("Free memory: {} bytes".format(gc.mem_free()))
-                
+
                 loop_counter += 1
-                
+
                 # Small delay to prevent CPU overload
                 time.sleep(0.001)
-                
+
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received")
                 break
             except Exception as e:
                 logger.error("Main loop error: {}".format(e))
                 time.sleep(1)  # Prevent rapid error loops
-        
+
     except Exception as e:
         logger.error("Fatal error: {}".format(e))
         if neopixel:
             try:
                 neopixel.show_status("error")
-            except:
+            except Exception:
                 pass
-    
+
     finally:
         # Cleanup
         logger.info("Shutting down...")
-        
+
         try:
             if api_server:
                 api_server.stop()
         except Exception as e:
             logger.error("Error stopping API server: {}".format(e))
-        
+
         try:
             if network_mgr:
                 network_mgr.disconnect()
         except Exception as e:
             logger.error("Error disconnecting network: {}".format(e))
-        
+
         try:
             if neopixel:
                 neopixel.turn_off()
         except Exception as e:
             logger.error("Error turning off LEDs: {}".format(e))
-        
+
         logger.info("Shutdown complete")
+
 
 # Entry point
 if __name__ == "__main__":
