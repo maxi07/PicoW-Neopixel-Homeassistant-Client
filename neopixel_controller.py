@@ -145,6 +145,8 @@ class NeoPixelController:
         """Turn on with last color/effect"""
         try:
             self.is_on = True
+            self._set_all(self.current_color)
+            self._show()
             logger.info("LEDs turned on")
         except Exception as e:
             logger.error("Failed to turn on: {}".format(e))
@@ -153,6 +155,8 @@ class NeoPixelController:
         """Set brightness (0-100)"""
         try:
             self.brightness = max(0, min(100, brightness))
+            self._set_all(self.current_color)
+            self._show()
             logger.info("Brightness set to {}%".format(self.brightness))
         except Exception as e:
             logger.error("Failed to set brightness: {}".format(e))
