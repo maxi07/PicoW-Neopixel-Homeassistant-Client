@@ -312,12 +312,12 @@ class NeoPixelController:
                 self._show()
 
             elif status == "ready":
-                # Ready - solid white (brief)
-                self.is_on = False
+                # Ready - solid white
+                self.is_on = True
+                self.current_effect = self.EFFECT_STATIC
+                self.current_color = self.COLOR_READY
                 self._set_all(self.COLOR_READY)
                 self._show()
-                time.sleep(1)
-                self.turn_off()
 
         except Exception as e:
             logger.error("Failed to show status: {}".format(e))
