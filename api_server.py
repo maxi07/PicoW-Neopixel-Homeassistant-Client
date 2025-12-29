@@ -136,6 +136,14 @@ class APIServer:
         """Handle state request"""
         try:
             state = self.controller.get_state()
+            logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{})".format(
+                state.get('is_on'),
+                state.get('brightness'),
+                state.get('effect'),
+                state.get('color', {}).get('r', 0),
+                state.get('color', {}).get('g', 0),
+                state.get('color', {}).get('b', 0)
+            ))
             self._send_response(client, 200, state)
         except Exception as e:
             logger.error("Failed to get state: {}".format(e))
@@ -155,32 +163,44 @@ class APIServer:
                 "supports_brightness": True
             }
         }
+        logger.debug("Returning device info: name={}, id={}, num_leds={}".format(
+            self.device_info.get('name'),
+            self.device_info.get('id'),
+            self.controller.num_leds
+        ))
         self._send_response(client, 200, info)
 
     def _handle_control(self, client, body):
         """Handle control command"""
         try:
             if not body:
+                logger.debug("Control request with no body")
                 self._send_response(client, 400, {"error": "No body provided"})
                 return
 
             command = json.loads(body)
+            logger.debug("Control command received: {}".format(json.dumps(command)))
 
             # Process command
             if "power" in command:
                 if command["power"] == "on":
+                    logger.debug("Turning on")
                     self.controller.turn_on()
                 elif command["power"] == "off":
+                    logger.debug("Turning off")
                     self.controller.turn_off()
 
             if "brightness" in command:
-                self.controller.set_brightness(command["brightness"])
+                brightness = command["brightness"]
+                logger.debug("Setting brightness to {}".format(brightness))
+                self.controller.set_brightness(brightness)
 
             if "color" in command and "effect" not in command:
                 color = command["color"]
                 r = color.get("r", 0)
                 g = color.get("g", 0)
                 b = color.get("b", 0)
+                logger.debug("Setting color to RGB({},{},{})".format(r, g, b))
                 self.controller.set_color(r, g, b)
 
             if "effect" in command:
@@ -195,11 +215,24 @@ class APIServer:
                         color.get("g", 0),
                         color.get("b", 0)
                     )
+                    logger.debug("Setting effect '{}' with speed {} and color RGB({},{},{})".format(
+                        effect, speed,
+                        color.get("r", 255),
+                        color.get("g", 0),
+                        color.get("b", 0)
+                    ))
+                else:
+                    logger.debug("Setting effect '{}' with speed {}".format(effect, speed))
 
                 self.controller.set_effect(effect, speed)
 
             # Return updated state
             state = self.controller.get_state()
+            logger.debug("Control successful, new state: is_on={}, brightness={}, effect={}".format(
+                state.get('is_on'),
+                state.get('brightness'),
+                state.get('effect')
+            ))
             self._send_response(client, 200, {"success": True, "state": state})
 
         except json.JSONDecodeError:
