@@ -162,7 +162,8 @@ class APIServer:
                 ],
                 "num_leds": self.controller.num_leds,
                 "supports_rgb": True,
-                "supports_brightness": True
+                "supports_brightness": True,
+                "supports_play_once": True
             },
             "diagnostics": {
                 "estimated_current_ma": self.controller.get_estimated_current_ma(),
@@ -191,6 +192,20 @@ class APIServer:
 
             command = json.loads(body)
             logger.debug("Control command received: {}".format(json.dumps(command)))
+
+            # Handle one-shot animation (exclusive — returns immediately)
+            if "play_once" in command:
+                effect = command["play_once"]
+                speed = command.get("speed", 50)
+                color = command.get("color", None)
+                color_tuple = None
+                if color:
+                    color_tuple = (color.get("r", 255), color.get("g", 0), color.get("b", 0))
+                logger.debug("Playing one-shot: {} (speed: {})".format(effect, speed))
+                self.controller.play_once(effect, speed, color_tuple)
+                state = self.controller.get_state()
+                self._send_response(client, 200, {"success": True, "state": state})
+                return
 
             # Process command
             if "power" in command:

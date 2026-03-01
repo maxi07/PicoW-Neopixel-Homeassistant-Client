@@ -59,6 +59,11 @@ class NeoPixelController:
             self._animation_running = False
             self._needs_refresh = False  # Flag: Core 1 should re-render immediately
 
+            # One-shot animation state
+            self._one_shot_active = False
+            self._one_shot_steps_remaining = 0
+            self._saved_state = None
+
             logger.info("NeoPixel initialized: {} LEDs on pin {} with brightness {}%".format(num_leds, pin, self.brightness))
 
         except Exception as e:
@@ -161,6 +166,12 @@ class NeoPixelController:
                 self._effect_scanner()
             elif self.current_effect == self.EFFECT_STROBE:
                 self._effect_strobe()
+
+            # Track one-shot progress and restore state when complete
+            if self._one_shot_active:
+                self._one_shot_steps_remaining -= self.step_size
+                if self._one_shot_steps_remaining <= 0:
+                    self._restore_state()
         except Exception as e:
             logger.error("Effect update failed: {}".format(e))
 
@@ -249,6 +260,78 @@ class NeoPixelController:
             logger.info("Animation speed set to {}% (step_size: {})".format(self.effect_speed, self.step_size))
         except Exception as e:
             logger.error("Failed to set speed: {}".format(e))
+
+    # One-shot animation support
+
+    def _get_one_shot_cycle_length(self, effect):
+        """Get the number of steps for one complete cycle of an effect."""
+        if effect == self.EFFECT_RAINBOW:
+            return 256
+        elif effect == self.EFFECT_FADE:
+            return 256
+        elif effect == self.EFFECT_CHASE:
+            return self.num_leds
+        elif effect == self.EFFECT_BREATHING:
+            return int(2 * 3.14159 * 20)  # One full sine cycle
+        elif effect == self.EFFECT_TWINKLE:
+            return max(30, self.num_leds * 2)
+        elif effect == self.EFFECT_SCANNER:
+            return (self.num_leds - 1) * 2
+        elif effect == self.EFFECT_STROBE:
+            return 20  # 10 flashes
+        return 100  # Fallback
+
+    def play_once(self, effect, speed=50, color=None):
+        """Play an effect once, then restore the previous state."""
+        try:
+            # Only save state if not already in one-shot mode
+            if not self._one_shot_active:
+                self._saved_state = {
+                    'is_on': self.is_on,
+                    'effect': self.current_effect,
+                    'color': self.current_color,
+                    'effect_color': self.effect_color,
+                    'brightness': self.brightness,
+                    'effect_speed': self.effect_speed,
+                    'update_interval': self.update_interval,
+                    'step_size': self.step_size,
+                }
+
+            # Configure one-shot effect
+            self.is_on = True
+            self.current_effect = effect
+            self.effect_step = 0
+            if color:
+                self.effect_color = color
+                self.current_color = color
+            self._calc_speed_params(speed)
+            self._one_shot_steps_remaining = self._get_one_shot_cycle_length(effect)
+            self._one_shot_active = True
+            self._needs_refresh = True
+            logger.info("One-shot started: {} ({} steps)".format(effect, self._one_shot_steps_remaining))
+        except Exception as e:
+            logger.error("Failed to start one-shot: {}".format(e))
+
+    def _restore_state(self):
+        """Restore state after one-shot animation completes."""
+        try:
+            if self._saved_state:
+                self.is_on = self._saved_state['is_on']
+                self.current_effect = self._saved_state['effect']
+                self.current_color = self._saved_state['color']
+                self.effect_color = self._saved_state['effect_color']
+                self.brightness = self._saved_state['brightness']
+                self.effect_speed = self._saved_state['effect_speed']
+                self.update_interval = self._saved_state['update_interval']
+                self.step_size = self._saved_state['step_size']
+                self._saved_state = None
+
+            self._one_shot_active = False
+            self._one_shot_steps_remaining = 0
+            self._needs_refresh = True
+            logger.info("One-shot complete, state restored")
+        except Exception as e:
+            logger.error("Failed to restore state: {}".format(e))
 
     # Effect implementations
 
@@ -420,6 +503,21 @@ class NeoPixelController:
 
     def get_state(self):
         """Get current state for reporting to Home Assistant"""
+        # During one-shot, report the saved (persistent) state
+        if self._one_shot_active and self._saved_state:
+            return {
+                "is_on": self._saved_state['is_on'],
+                "effect": self._saved_state['effect'],
+                "brightness": self._saved_state['brightness'],
+                "speed": self._saved_state['effect_speed'],
+                "color": {
+                    "r": self._saved_state['color'][0],
+                    "g": self._saved_state['color'][1],
+                    "b": self._saved_state['color'][2]
+                },
+                "one_shot_active": True,
+                "one_shot_effect": self.current_effect,
+            }
         return {
             "is_on": self.is_on,
             "effect": self.current_effect,
@@ -429,7 +527,8 @@ class NeoPixelController:
                 "r": self.current_color[0],
                 "g": self.current_color[1],
                 "b": self.current_color[2]
-            }
+            },
+            "one_shot_active": False,
         }
 
     def get_estimated_current_ma(self):
