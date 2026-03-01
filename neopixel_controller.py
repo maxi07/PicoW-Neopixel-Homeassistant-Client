@@ -52,7 +52,7 @@ class NeoPixelController:
 
             # Effect parameters
             self.effect_speed = 50  # Default speed
-            self.effect_color = (255, 0, 0)
+            self.effect_color = self.current_color  # Sync with current_color
             self.step_size = 1  # Steps per animation frame (increases with speed)
 
             # Core 1 animation state
@@ -411,6 +411,7 @@ class NeoPixelController:
                 self.is_on = True
                 self.current_effect = self.EFFECT_STATIC
                 self.current_color = self.COLOR_READY
+                self.effect_color = self.COLOR_READY
                 self._set_all(self.COLOR_READY)
                 self._show()
 

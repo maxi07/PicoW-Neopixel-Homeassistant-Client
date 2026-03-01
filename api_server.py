@@ -174,7 +174,6 @@ class APIServer:
             info["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
             info["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
             info["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
-            info["diagnostics"]["wifi_bssid"] = self.network_mgr.get_bssid()
         logger.debug("Returning device info: name={}, id={}, num_leds={}".format(
             self.device_info.get('name'),
             self.device_info.get('id'),

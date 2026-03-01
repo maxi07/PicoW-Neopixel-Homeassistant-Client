@@ -176,12 +176,3 @@ class NetworkManager:
         except Exception:
             return None
 
-    def get_bssid(self):
-        """Get WiFi BSSID of the actually connected access point"""
-        try:
-            if self.connected:
-                bssid_bytes = self.wlan.config('bssid')
-                return ':'.join('{:02x}'.format(b) for b in bssid_bytes)
-            return None
-        except Exception:
-            return None
