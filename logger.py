@@ -1,8 +1,10 @@
 """
 Logging module for PicoW NeoPixel Controller
 Supports console and file logging with different log levels
+Thread-safe via _thread lock to prevent USB serial crashes on dual-core RP2040
 """
 import time
+import _thread
 
 
 class Logger:
@@ -17,6 +19,9 @@ class Logger:
         WARNING: "WARNING",
         ERROR: "ERROR"
     }
+
+    # Shared lock across all Logger instances — protects print() and file I/O
+    _lock = _thread.allocate_lock()
 
     def __init__(self, name, log_file="logs.txt", console_level=DEBUG, file_level=WARNING):
         self.name = name
@@ -39,20 +44,24 @@ class Logger:
         return "[{}] [{}] [{}] {}".format(time_str, level_name, self.name, message)
 
     def _log(self, level, message):
-        """Internal logging method"""
+        """Internal logging method (thread-safe)"""
         formatted = self._format_message(level, message)
 
-        # Console logging
-        if level >= self.console_level:
-            print(formatted)
+        Logger._lock.acquire()
+        try:
+            # Console logging
+            if level >= self.console_level:
+                print(formatted)
 
-        # File logging
-        if level >= self.file_level:
-            try:
-                with open(self.log_file, "a") as f:
-                    f.write(formatted + "\n")
-            except Exception as e:
-                print("Failed to write to log file: {}".format(e))
+            # File logging
+            if level >= self.file_level:
+                try:
+                    with open(self.log_file, "a") as f:
+                        f.write(formatted + "\n")
+                except Exception as e:
+                    print("Failed to write to log file: {}".format(e))
+        finally:
+            Logger._lock.release()
 
     def debug(self, message):
         """Log debug message"""
