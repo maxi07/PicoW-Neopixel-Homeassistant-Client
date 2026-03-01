@@ -177,20 +177,11 @@ class NetworkManager:
             return None
 
     def get_bssid(self):
-        """Get WiFi BSSID of connected access point"""
+        """Get WiFi BSSID of the actually connected access point"""
         try:
             if self.connected:
-                # Scan for networks and find the one we're connected to
-                try:
-                    networks = self.wlan.scan()
-                    for net in networks:
-                        # net = (ssid, bssid, channel, rssi, security, hidden)
-                        if net[0].decode() == self.ssid:
-                            bssid_bytes = net[1]
-                            return ':'.join('{:02x}'.format(b) for b in bssid_bytes)
-                except Exception:
-                    pass
-                return None
+                bssid_bytes = self.wlan.config('bssid')
+                return ':'.join('{:02x}'.format(b) for b in bssid_bytes)
             return None
         except Exception:
             return None

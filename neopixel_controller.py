@@ -4,6 +4,8 @@ Manages LED strip with various animations on a dedicated core (Core 1)
 """
 import time
 import math
+import gc
+import random
 import _thread
 from machine import Pin
 from neopixel import NeoPixel
@@ -64,9 +66,9 @@ class NeoPixelController:
             raise
 
     def _apply_brightness(self, color):
-        """Apply brightness adjustment to color"""
+        """Apply brightness adjustment to color (allocation-free)"""
         factor = self.brightness / 100.0
-        return tuple(int(c * factor) for c in color)
+        return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
 
     def _set_all(self, color):
         """Set all LEDs to same color"""
@@ -99,6 +101,7 @@ class NeoPixelController:
     def _animation_loop(self):
         """Dedicated animation loop running on Core 1 — sole owner of strip writes."""
         logger.info("Core 1: Animation loop running")
+        gc_counter = 0
         try:
             while self._animation_running:
                 try:
@@ -120,6 +123,13 @@ class NeoPixelController:
                     self.update()
                     # Sleep based on update_interval for precise timing
                     time.sleep_ms(max(1, self.update_interval))
+
+                    # Periodic GC on Core 1 (every ~100 frames)
+                    gc_counter += 1
+                    if gc_counter >= 100:
+                        gc.collect()
+                        gc_counter = 0
+
                 except Exception as e:
                     logger.error("Animation loop error: {}".format(e))
                     time.sleep_ms(50)
@@ -136,7 +146,7 @@ class NeoPixelController:
 
         try:
             if self.current_effect == self.EFFECT_STATIC:
-                self._effect_static()
+                return  # Static needs no per-frame update
             elif self.current_effect == self.EFFECT_RAINBOW:
                 self._effect_rainbow()
             elif self.current_effect == self.EFFECT_FADE:
@@ -249,10 +259,11 @@ class NeoPixelController:
 
     def _effect_rainbow(self):
         """Rainbow cycle effect"""
+        br = self.brightness / 100.0
         for i in range(self.num_leds):
             hue = (i * 256 // self.num_leds + self.effect_step) % 256
-            color = self._hsv_to_rgb(hue / 256.0, 1.0, 1.0)
-            self.strip[i] = self._apply_brightness(color)
+            r, g, b = self._hsv_to_rgb(hue / 256.0, 1.0, 1.0)
+            self.strip[i] = (int(r * br), int(g * br), int(b * br))
         self._show()
         self.effect_step = (self.effect_step + self.step_size) % 256
 
@@ -286,12 +297,12 @@ class NeoPixelController:
 
     def _effect_twinkle(self):
         """Twinkle/sparkle effect"""
-        import random
         if self.effect_step % 3 == 0:  # Update some LEDs
+            color_on = self._apply_brightness(self.effect_color)
             for _ in range(self.num_leds // 10):  # 10% of LEDs
                 led = random.randint(0, self.num_leds - 1)
                 if random.random() > 0.5:
-                    self.strip[led] = self._apply_brightness(self.effect_color)
+                    self.strip[led] = color_on
                 else:
                     self.strip[led] = self.COLOR_OFF
             self._show()
@@ -309,13 +320,14 @@ class NeoPixelController:
         else:
             actual_pos = cycle_length - pos
 
-        # Draw scanner with tail
+        # Draw scanner with tail (avoid tuple allocation in loop)
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
         for i in range(5):
             led_pos = actual_pos - i
             if 0 <= led_pos < self.num_leds:
-                brightness_factor = (5 - i) / 5.0
-                color = tuple(int(c * brightness_factor) for c in self.effect_color)
-                self.strip[led_pos] = self._apply_brightness(color)
+                f = (5 - i) / 5.0 * br
+                self.strip[led_pos] = (int(er * f), int(eg * f), int(eb * f))
 
         self._show()
         self.effect_step += self.step_size
