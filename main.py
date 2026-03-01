@@ -76,7 +76,7 @@ def main():
         # Initialize API server
         logger.info("Starting API server...")
         api_port = int(config.get("api", "port") or 80)
-        api_server = APIServer(neopixel, device_info, api_port)
+        api_server = APIServer(neopixel, device_info, api_port, network_mgr)
 
         if not api_server.start():
             logger.error("Failed to start API server")

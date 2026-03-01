@@ -10,11 +10,12 @@ logger = Logger("API")
 
 
 class APIServer:
-    def __init__(self, neopixel_controller, device_info, port=80):
+    def __init__(self, neopixel_controller, device_info, port=80, network_mgr=None):
         """Initialize API server"""
         self.controller = neopixel_controller
         self.device_info = device_info
         self.port = port
+        self.network_mgr = network_mgr
         self.socket = None
         self.running = False
 
@@ -151,6 +152,7 @@ class APIServer:
 
     def _handle_get_info(self, client):
         """Handle device info request"""
+        import gc
         info = {
             "device": self.device_info,
             "capabilities": {
@@ -161,8 +163,18 @@ class APIServer:
                 "num_leds": self.controller.num_leds,
                 "supports_rgb": True,
                 "supports_brightness": True
+            },
+            "diagnostics": {
+                "estimated_current_ma": self.controller.get_estimated_current_ma(),
+                "free_memory": gc.mem_free(),
             }
         }
+        # Add WiFi diagnostics if network_mgr is available
+        if self.network_mgr:
+            info["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
+            info["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
+            info["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
+            info["diagnostics"]["wifi_bssid"] = self.network_mgr.get_bssid()
         logger.debug("Returning device info: name={}, id={}, num_leds={}".format(
             self.device_info.get('name'),
             self.device_info.get('id'),

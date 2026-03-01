@@ -145,3 +145,52 @@ class NetworkManager:
             return ':'.join('{:02x}'.format(b) for b in mac)
         except Exception:
             return None
+
+    def get_rssi(self):
+        """Get WiFi signal strength in dBm"""
+        try:
+            if self.connected:
+                return self.wlan.status('rssi')
+            return None
+        except Exception:
+            return None
+
+    def get_signal_percent(self):
+        """Get WiFi signal strength as percentage (0-100)"""
+        try:
+            rssi = self.get_rssi()
+            if rssi is None:
+                return None
+            # Convert dBm to percentage: -30dBm=100%, -90dBm=0%
+            percent = max(0, min(100, int((rssi + 90) * 100 / 60)))
+            return percent
+        except Exception:
+            return None
+
+    def get_channel(self):
+        """Get WiFi channel"""
+        try:
+            if self.connected:
+                return self.wlan.config('channel')
+            return None
+        except Exception:
+            return None
+
+    def get_bssid(self):
+        """Get WiFi BSSID of connected access point"""
+        try:
+            if self.connected:
+                # Scan for networks and find the one we're connected to
+                try:
+                    networks = self.wlan.scan()
+                    for net in networks:
+                        # net = (ssid, bssid, channel, rssi, security, hidden)
+                        if net[0].decode() == self.ssid:
+                            bssid_bytes = net[1]
+                            return ':'.join('{:02x}'.format(b) for b in bssid_bytes)
+                except Exception:
+                    pass
+                return None
+            return None
+        except Exception:
+            return None

@@ -418,3 +418,22 @@ class NeoPixelController:
                 "b": self.current_color[2]
             }
         }
+
+    def get_estimated_current_ma(self):
+        """Estimate current draw in mA based on LED state.
+
+        WS2812B: ~60mA per LED at full white (20mA per channel).
+        Scaled by brightness and actual color values.
+        """
+        if not self.is_on:
+            return 0
+        try:
+            r, g, b = self.current_color
+            brightness_factor = self.brightness / 100.0
+            # Average color intensity (0-1)
+            color_factor = (r + g + b) / (3 * 255.0)
+            # Each LED: up to 60mA
+            per_led_ma = 60.0 * brightness_factor * color_factor
+            return int(per_led_ma * self.num_leds)
+        except Exception:
+            return 0
