@@ -112,8 +112,8 @@ def main():
 
                 loop_counter += 1
 
-                # Small delay to prevent CPU overload
-                time.sleep(0.001)
+                # Yield CPU — animations run independently on Core 1
+                time.sleep(0.01)
 
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received")
