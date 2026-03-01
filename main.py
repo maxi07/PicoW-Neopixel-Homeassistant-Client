@@ -41,7 +41,7 @@ def main():
 
         # Show boot animation
         logger.info("Running boot animation...")
-        neopixel.show_status("boot")
+        # neopixel.show_status("boot")
 
         # Initialize network manager
         logger.info("Initializing network...")
@@ -87,16 +87,16 @@ def main():
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
 
-        # Main event loop
+        # Start animation loop on Core 1
+        neopixel.start_animation_loop()
+
+        # Main event loop (Core 0: API + Network)
         loop_counter = 0
         last_gc = time.ticks_ms()
 
         while True:
             try:
-                # Update NeoPixel animations (non-blocking)
-                neopixel.update()
-
-                # Handle API requests (non-blocking)
+                # Handle API requests (Core 0)
                 api_server.handle_requests()
 
                 # Check network connection (periodic)
@@ -133,6 +133,12 @@ def main():
     finally:
         # Cleanup
         logger.info("Shutting down...")
+
+        try:
+            if neopixel:
+                neopixel.stop_animation_loop()
+        except Exception as e:
+            logger.error("Error stopping animation loop: {}".format(e))
 
         try:
             if api_server:

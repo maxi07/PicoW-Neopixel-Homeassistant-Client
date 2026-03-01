@@ -1,9 +1,10 @@
 """
-Non-blocking NeoPixel Controller with Effects
-Manages LED strip with various animations that don't block command reception
+NeoPixel Controller with Effects
+Manages LED strip with various animations on a dedicated core (Core 1)
 """
 import time
 import math
+import _thread
 from machine import Pin
 from neopixel import NeoPixel
 from logger import Logger
@@ -50,6 +51,11 @@ class NeoPixelController:
             # Effect parameters
             self.effect_speed = 50  # Default speed
             self.effect_color = (255, 0, 0)
+            self.step_size = 1  # Steps per animation frame (increases with speed)
+
+            # Core 1 animation state
+            self._animation_running = False
+            self._needs_refresh = False  # Flag: Core 1 should re-render immediately
 
             logger.info("NeoPixel initialized: {} LEDs on pin {}".format(num_leds, pin))
 
@@ -69,22 +75,64 @@ class NeoPixelController:
             self.strip[i] = color
 
     def _show(self):
-        """Update LED strip (with error handling)"""
+        """Update LED strip — only called from Core 1"""
         try:
             self.strip.write()
         except Exception as e:
             logger.error("Failed to update strip: {}".format(e))
 
+    def start_animation_loop(self):
+        """Start the animation loop on Core 1"""
+        if self._animation_running:
+            logger.info("Animation loop already running")
+            return
+
+        self._animation_running = True
+        _thread.start_new_thread(self._animation_loop, ())
+        logger.info("Animation loop started on Core 1")
+
+    def stop_animation_loop(self):
+        """Stop the animation loop"""
+        self._animation_running = False
+        logger.info("Animation loop stopping...")
+
+    def _animation_loop(self):
+        """Dedicated animation loop running on Core 1 — sole owner of strip writes."""
+        logger.info("Core 1: Animation loop running")
+        try:
+            while self._animation_running:
+                try:
+                    if not self.is_on:
+                        # Device turned off — clear strip once, then idle
+                        if self._needs_refresh:
+                            self._set_all(self.COLOR_OFF)
+                            self._show()
+                            self._needs_refresh = False
+                        time.sleep_ms(50)
+                        continue
+
+                    # Process immediate refresh (color/brightness change)
+                    if self._needs_refresh and self.current_effect == self.EFFECT_STATIC:
+                        self._set_all(self.current_color)
+                        self._show()
+                        self._needs_refresh = False
+
+                    self.update()
+                    # Sleep based on update_interval for precise timing
+                    time.sleep_ms(max(1, self.update_interval))
+                except Exception as e:
+                    logger.error("Animation loop error: {}".format(e))
+                    time.sleep_ms(50)
+        except Exception as e:
+            logger.error("Animation loop fatal error: {}".format(e))
+        finally:
+            self._animation_running = False
+            logger.info("Core 1: Animation loop stopped")
+
     def update(self):
-        """Non-blocking update method - call frequently in main loop"""
+        """Update animation frame - called by animation loop on Core 1"""
         if not self.is_on:
             return
-
-        current_time = time.ticks_ms()
-        if time.ticks_diff(current_time, self.last_update) < self.update_interval:
-            return
-
-        self.last_update = current_time
 
         try:
             if self.current_effect == self.EFFECT_STATIC:
@@ -107,59 +155,90 @@ class NeoPixelController:
             logger.error("Effect update failed: {}".format(e))
 
     def set_color(self, r, g, b):
-        """Set static color"""
+        """Set static color (state only — Core 1 renders)"""
         try:
             self.is_on = True
             self.current_effect = self.EFFECT_STATIC
             self.current_color = (r, g, b)
             self.effect_color = (r, g, b)
-            self._set_all(self.current_color)
-            self._show()
+            self._needs_refresh = True
             logger.info("Color set to RGB({}, {}, {})".format(r, g, b))
         except Exception as e:
             logger.error("Failed to set color: {}".format(e))
 
+    def _calc_speed_params(self, speed):
+        """Calculate update_interval and step_size from speed (1-100).
+
+        Uses a quadratic curve for the interval so high speeds get very short
+        intervals (= smooth) while low speeds stay perceptibly slow.
+        step_size stays at 1 for most of the range to avoid visible jumps;
+        only at extreme speeds (>80%) a mild multiplier kicks in.
+
+        Examples:
+            1%  → 490ms, step=1  (very slow)
+           25%  → 281ms, step=1
+           50%  → 125ms, step=1  (moderate, ~8 fps)
+           75%  →  31ms, step=1  (fast, ~32 fps)
+           80%  →  20ms, step=1  (smooth, ~50 fps)
+           90%  →   5ms, step=2  (~400 effective steps/s)
+          100%  →   1ms, step=3  (~3000 effective steps/s)
+        """
+        self.effect_speed = max(1, min(100, speed))
+        # Quadratic curve: interval drops steeply at high speeds
+        inv = (100 - self.effect_speed) / 100.0
+        self.update_interval = max(1, int(500 * inv * inv))
+        # Gentle step multiplier only at extreme speeds for extra boost
+        if self.effect_speed <= 80:
+            self.step_size = 1
+        else:
+            self.step_size = 1 + (self.effect_speed - 80) // 10  # 81-90→2, 91-100→3
+
     def set_effect(self, effect_name, speed=50):
-        """Start an effect"""
+        """Start an effect (state only — Core 1 renders)"""
         try:
             self.is_on = True
             self.current_effect = effect_name
-            self.effect_speed = max(1, min(100, speed))
             self.effect_step = 0
-            self.update_interval = 200 - (self.effect_speed * 2)  # Faster speed = shorter interval
-            logger.info("Effect started: {} (speed: {})".format(effect_name, speed))
+            self._calc_speed_params(speed)
+            self._needs_refresh = True
+            logger.info("Effect started: {} (speed: {}, step_size: {})".format(effect_name, speed, self.step_size))
         except Exception as e:
             logger.error("Failed to set effect: {}".format(e))
 
     def turn_off(self):
-        """Turn off all LEDs"""
+        """Turn off all LEDs (state only — Core 1 clears strip)"""
         try:
             self.is_on = False
-            self._set_all(self.COLOR_OFF)
-            self._show()
+            self._needs_refresh = True
             logger.info("LEDs turned off")
         except Exception as e:
             logger.error("Failed to turn off: {}".format(e))
 
     def turn_on(self):
-        """Turn on with last color/effect"""
+        """Turn on with last color/effect (state only — Core 1 renders)"""
         try:
             self.is_on = True
-            self._set_all(self.current_color)
-            self._show()
+            self._needs_refresh = True
             logger.info("LEDs turned on")
         except Exception as e:
             logger.error("Failed to turn on: {}".format(e))
 
     def set_brightness(self, brightness):
-        """Set brightness (0-100)"""
+        """Set brightness (0-100, state only — Core 1 renders)"""
         try:
             self.brightness = max(0, min(100, brightness))
-            self._set_all(self.current_color)
-            self._show()
+            self._needs_refresh = True
             logger.info("Brightness set to {}%".format(self.brightness))
         except Exception as e:
             logger.error("Failed to set brightness: {}".format(e))
+
+    def set_speed(self, speed):
+        """Set animation speed (1-100) without changing the current effect"""
+        try:
+            self._calc_speed_params(speed)
+            logger.info("Animation speed set to {}% (step_size: {})".format(self.effect_speed, self.step_size))
+        except Exception as e:
+            logger.error("Failed to set speed: {}".format(e))
 
     # Effect implementations
 
@@ -175,7 +254,7 @@ class NeoPixelController:
             color = self._hsv_to_rgb(hue / 256.0, 1.0, 1.0)
             self.strip[i] = self._apply_brightness(color)
         self._show()
-        self.effect_step = (self.effect_step + 1) % 256
+        self.effect_step = (self.effect_step + self.step_size) % 256
 
     def _effect_fade(self):
         """Color fade effect"""
@@ -183,7 +262,7 @@ class NeoPixelController:
         color = self._hsv_to_rgb(hue, 1.0, 1.0)
         self._set_all(color)
         self._show()
-        self.effect_step = (self.effect_step + 1) % 256
+        self.effect_step = (self.effect_step + self.step_size) % 256
 
     def _effect_chase(self):
         """Chase/running light effect"""
@@ -193,7 +272,7 @@ class NeoPixelController:
             led_pos = (pos + i) % self.num_leds
             self.strip[led_pos] = self._apply_brightness(self.effect_color)
         self._show()
-        self.effect_step += 1
+        self.effect_step += self.step_size
 
     def _effect_breathing(self):
         """Breathing effect (pulsing brightness)"""
@@ -203,7 +282,7 @@ class NeoPixelController:
         self._set_all(self.effect_color)
         self._show()
         self.brightness = temp_brightness
-        self.effect_step += 1
+        self.effect_step += self.step_size
 
     def _effect_twinkle(self):
         """Twinkle/sparkle effect"""
@@ -216,7 +295,7 @@ class NeoPixelController:
                 else:
                     self.strip[led] = self.COLOR_OFF
             self._show()
-        self.effect_step += 1
+        self.effect_step += self.step_size
 
     def _effect_scanner(self):
         """Scanner effect (Knight Rider style)"""
@@ -239,7 +318,7 @@ class NeoPixelController:
                 self.strip[led_pos] = self._apply_brightness(color)
 
         self._show()
-        self.effect_step += 1
+        self.effect_step += self.step_size
 
     def _effect_strobe(self):
         """Strobe effect"""
@@ -248,7 +327,7 @@ class NeoPixelController:
         else:
             self._set_all(self.COLOR_OFF)
         self._show()
-        self.effect_step += 1
+        self.effect_step += self.step_size
 
     def _hsv_to_rgb(self, h, s, v):
         """Convert HSV to RGB color"""
@@ -288,7 +367,7 @@ class NeoPixelController:
                         color = self._hsv_to_rgb(hue / 256.0, 1.0, 1.0)
                         self.strip[i] = self._apply_brightness(color)
                     self._show()
-                    time.sleep(0.005)
+                    time.sleep(0.001)
 
             elif status == "wifi_connecting":
                 # WiFi connecting - pulsing blue
@@ -332,6 +411,7 @@ class NeoPixelController:
             "is_on": self.is_on,
             "effect": self.current_effect,
             "brightness": self.brightness,
+            "speed": self.effect_speed,
             "color": {
                 "r": self.current_color[0],
                 "g": self.current_color[1],

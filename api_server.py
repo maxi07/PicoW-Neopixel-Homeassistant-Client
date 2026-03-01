@@ -195,6 +195,11 @@ class APIServer:
                 logger.debug("Setting brightness to {}".format(brightness))
                 self.controller.set_brightness(brightness)
 
+            if "speed" in command and "effect" not in command:
+                speed = command["speed"]
+                logger.debug("Setting animation speed to {}".format(speed))
+                self.controller.set_speed(speed)
+
             if "color" in command and "effect" not in command:
                 color = command["color"]
                 r = color.get("r", 0)
