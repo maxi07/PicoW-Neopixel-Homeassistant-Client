@@ -5,6 +5,7 @@ Manages WiFi connection with automatic reconnection on failure
 import network
 import time
 from logger import Logger
+from neopixel_controller import NeoPixelController
 
 logger = Logger("Network")
 
@@ -21,7 +22,7 @@ class NetworkManager:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 10
 
-    def connect(self, neopixel_controller=None):
+    def connect(self, neopixel_controller: NeoPixelController):
         """Connect to WiFi with visual feedback"""
         try:
             logger.info("Connecting to WiFi: {}".format(self.ssid))

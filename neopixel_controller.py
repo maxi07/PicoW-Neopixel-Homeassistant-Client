@@ -59,7 +59,7 @@ class NeoPixelController:
             self._animation_running = False
             self._needs_refresh = False  # Flag: Core 1 should re-render immediately
 
-            logger.info("NeoPixel initialized: {} LEDs on pin {}".format(num_leds, pin))
+            logger.info("NeoPixel initialized: {} LEDs on pin {} with brightness {}%".format(num_leds, pin, self.brightness))
 
         except Exception as e:
             logger.error("Failed to initialize NeoPixel: {}".format(e))
