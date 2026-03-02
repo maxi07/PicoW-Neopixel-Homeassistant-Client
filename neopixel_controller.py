@@ -251,6 +251,12 @@ class NeoPixelController:
         except Exception as e:
             logger.error("Failed to set color: {}".format(e))
 
+    def set_color_only(self, color):
+        """Set color without changing effect (for status animations)"""
+        self.current_color = color
+        self.effect_color = color
+        self._needs_refresh = True
+
     def _calc_speed_params(self, speed):
         """Calculate _speed_inc from speed (1-100).
 

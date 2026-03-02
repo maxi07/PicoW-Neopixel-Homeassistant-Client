@@ -55,11 +55,22 @@ def main():
 
         network_mgr = NetworkManager(ssid, password)
 
-        # Connect to WiFi
-        if not network_mgr.connect(neopixel):
+        # Start animation loop on Core 1 and show WiFi connecting animation
+        neopixel.set_effect(neopixel.EFFECT_BREATHING, speed=50)
+        neopixel.set_color_only(neopixel.COLOR_WIFI_CONNECTING)
+        neopixel.start_animation_loop()
+
+        # Connect to WiFi (breathing blue runs on Core 1)
+        if not network_mgr.connect():
             logger.error("Failed to connect to WiFi")
+            neopixel.stop_animation_loop()
+            time.sleep(0.5)
             neopixel.show_status("error")
+            time.sleep(10)  # Show error for 10 seconds
             return
+
+        # WiFi connected - show ready
+        neopixel.show_status("ready")
 
         # Get device info
         device_info = {
@@ -86,9 +97,6 @@ def main():
         logger.info("="*50)
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
-
-        # Start animation loop on Core 1
-        neopixel.start_animation_loop()
 
         # Main event loop (Core 0: API + Network)
         loop_counter = 0
@@ -152,9 +160,12 @@ def main():
         except Exception as e:
             logger.error("Error disconnecting network: {}".format(e))
 
+        # Only turn off LEDs if not already showing an error status
         try:
-            if neopixel:
+            if neopixel and not neopixel.current_color == neopixel.COLOR_ERROR:
                 neopixel.turn_off()
+            else:
+                logger.info("Keeping error status LEDs on")
         except Exception as e:
             logger.error("Error turning off LEDs: {}".format(e))
 
