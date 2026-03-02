@@ -24,6 +24,7 @@ class NeoPixelController:
     EFFECT_TWINKLE = "twinkle"
     EFFECT_SCANNER = "scanner"
     EFFECT_STROBE = "strobe"
+    EFFECT_COMET = "comet"
 
     # Status colors
     COLOR_BOOT = (255, 165, 0)      # Orange - Boot animation
@@ -166,6 +167,8 @@ class NeoPixelController:
                 self._effect_scanner()
             elif self.current_effect == self.EFFECT_STROBE:
                 self._effect_strobe()
+            elif self.current_effect == self.EFFECT_COMET:
+                self._effect_comet()
 
             # Track one-shot progress and restore state when complete
             if self._one_shot_active:
@@ -279,6 +282,8 @@ class NeoPixelController:
             return (self.num_leds - 1) * 2
         elif effect == self.EFFECT_STROBE:
             return 20  # 10 flashes
+        elif effect == self.EFFECT_COMET:
+            return self.num_leds * 2
         return 100  # Fallback
 
     def play_once(self, effect, speed=50, color=None):
@@ -421,6 +426,35 @@ class NeoPixelController:
             self._set_all(self.effect_color)
         else:
             self._set_all(self.COLOR_OFF)
+        self._show()
+        self.effect_step += self.step_size
+
+    def _effect_comet(self):
+        """Comet effect — multiple comets with fading tails racing across the strip."""
+        # Dim the entire strip to create fading tails
+        decay = 0.6  # Tail fade factor (lower = shorter tail)
+        for i in range(self.num_leds):
+            r, g, b = self.strip[i]
+            self.strip[i] = (int(r * decay), int(g * decay), int(b * decay))
+
+        # Comet parameters
+        num_comets = max(1, self.num_leds // 30)  # ~1 comet per 30 LEDs
+        spacing = self.num_leds // num_comets
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+        comet_len = 5  # Bright head length
+
+        for c in range(num_comets):
+            # Each comet is offset by spacing; they all advance with effect_step
+            head = (self.effect_step + c * spacing) % self.num_leds
+            for j in range(comet_len):
+                pos = (head - j) % self.num_leds
+                f = (comet_len - j) / comet_len * br
+                pr, pg, pb = int(er * f), int(eg * f), int(eb * f)
+                # Keep the brighter of existing vs new value (comets can overlap tails)
+                old_r, old_g, old_b = self.strip[pos]
+                self.strip[pos] = (max(old_r, pr), max(old_g, pg), max(old_b, pb))
+
         self._show()
         self.effect_step += self.step_size
 
