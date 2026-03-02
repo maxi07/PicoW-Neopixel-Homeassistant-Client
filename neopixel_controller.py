@@ -25,6 +25,8 @@ class NeoPixelController:
     EFFECT_SCANNER = "scanner"
     EFFECT_STROBE = "strobe"
     EFFECT_COMET = "comet"
+    EFFECT_CHASE_MIDDLE_OUT = "chase_middle_out"
+    EFFECT_CHASE_OUTSIDE_IN = "chase_outside_in"
 
     # Status colors
     COLOR_BOOT = (255, 165, 0)      # Orange - Boot animation
@@ -211,6 +213,10 @@ class NeoPixelController:
                 self._effect_strobe()
             elif self.current_effect == self.EFFECT_COMET:
                 self._effect_comet()
+            elif self.current_effect == self.EFFECT_CHASE_MIDDLE_OUT:
+                self._effect_chase_middle_out()
+            elif self.current_effect == self.EFFECT_CHASE_OUTSIDE_IN:
+                self._effect_chase_outside_in()
         except Exception as e:
             logger.error("Effect render failed: {}".format(e))
 
@@ -297,24 +303,57 @@ class NeoPixelController:
 
     # One-shot animation support
 
+    def _get_effect_tail_length(self, effect):
+        """Get the tail/head length for effects that have one.
+        
+        This is the ENTRY padding - how much the head starts outside the strip.
+        """
+        if effect == self.EFFECT_CHASE:
+            return 8  # chase_len - head enters from outside
+        elif effect == self.EFFECT_SCANNER:
+            return 8  # head_len
+        elif effect == self.EFFECT_COMET:
+            return 15  # comet_len + tail fade
+        elif effect == self.EFFECT_CHASE_OUTSIDE_IN:
+            return 8  # Head starts outside, enters the strip
+        elif effect == self.EFFECT_CHASE_MIDDLE_OUT:
+            return 0  # Head starts IN the center, no entry padding needed
+        return 0  # No padding needed for other effects
+
     def _get_one_shot_cycle_length(self, effect):
-        """Get the number of steps for one complete cycle of an effect."""
+        """Get the number of steps for one complete cycle of an effect.
+        
+        Includes padding for tail effects so animation fully enters and exits.
+        """
+        padding = self._get_effect_tail_length(effect)
+        
         if effect == self.EFFECT_RAINBOW:
             return 256
         elif effect == self.EFFECT_FADE:
             return 256
         elif effect == self.EFFECT_CHASE:
-            return self.num_leds
+            # Full strip + 2x padding (enter + exit)
+            return self.num_leds + 2 * padding
         elif effect == self.EFFECT_BREATHING:
             return int(2 * 3.14159 * 20)  # One full sine cycle
         elif effect == self.EFFECT_TWINKLE:
             return max(30, self.num_leds * 2)
         elif effect == self.EFFECT_SCANNER:
-            return (self.num_leds - 1) * 2
+            # Full cycle + 2x padding (enter + exit)
+            return (self.num_leds - 1) * 2 + 2 * padding
         elif effect == self.EFFECT_STROBE:
             return 20  # 10 flashes
         elif effect == self.EFFECT_COMET:
-            return self.num_leds * 2
+            # Full strip + 2x padding (enter + exit)
+            return self.num_leds * 2 + 2 * padding
+        elif effect == self.EFFECT_CHASE_MIDDLE_OUT:
+            # Head starts at center, moves to edge, tail exits completely
+            # Distance: half strip + chase_len for tail to exit
+            return (self.num_leds + 1) // 2 + 8
+        elif effect == self.EFFECT_CHASE_OUTSIDE_IN:
+            # Head starts outside (-chase_len), moves to center, tail finishes at center
+            # Total distance: chase_len (entry) + half (to center) + chase_len (tail to finish)
+            return (self.num_leds + 1) // 2 + 2 * 8
         return 100  # Fallback
 
     def play_once(self, effect, speed=50, color=None):
@@ -337,8 +376,12 @@ class NeoPixelController:
             # Configure one-shot effect
             self.is_on = True
             self.current_effect = effect
-            self.effect_step = 0
-            self._effect_pos_f = 0.0
+            
+            # Start with negative offset for effects with tails
+            # This makes the animation "enter" from outside the visible strip
+            padding = self._get_effect_tail_length(effect)
+            self._effect_pos_f = -float(padding)
+            self.effect_step = -padding
             if color:
                 self.effect_color = color
                 self.current_color = color
@@ -398,18 +441,31 @@ class NeoPixelController:
 
     def _effect_chase(self):
         """Chase/running light effect — sub-pixel smooth"""
-        pos_f = self._effect_pos_f % self.num_leds
+        # Use modulo for looping, raw position for one-shot
+        if self._one_shot_active:
+            pos_f = self._effect_pos_f
+        else:
+            pos_f = self._effect_pos_f % self.num_leds
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
         chase_len = 8
 
         for i in range(self.num_leds):
-            dist = (pos_f - i) % self.num_leds
-            if dist < chase_len:
-                f = (chase_len - dist) / chase_len * br
-                self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+            # For one-shot: use direct distance, for loop: use modulo distance
+            if self._one_shot_active:
+                dist = pos_f - i
+                if dist < 0 or dist >= chase_len:
+                    self.strip[i] = (0, 0, 0)
+                else:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
             else:
-                self.strip[i] = (0, 0, 0)
+                dist = (pos_f - i) % self.num_leds
+                if dist < chase_len:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+                else:
+                    self.strip[i] = (0, 0, 0)
 
         self._show()
 
@@ -445,8 +501,21 @@ class NeoPixelController:
     def _effect_scanner(self):
         """Scanner effect (Knight Rider style) — sub-pixel smooth"""
         cycle_length = (self.num_leds - 1) * 2
-        pos_f = self._effect_pos_f % cycle_length
-        actual_pos = pos_f if pos_f < self.num_leds else cycle_length - pos_f
+        # Use modulo for looping, raw position for one-shot
+        if self._one_shot_active:
+            pos_f = self._effect_pos_f
+            # Still compute bounce direction but allow enter/exit
+            if pos_f < 0:
+                actual_pos = pos_f  # Head entering from left
+            elif pos_f < self.num_leds:
+                actual_pos = pos_f
+            elif pos_f < cycle_length:
+                actual_pos = cycle_length - pos_f
+            else:
+                actual_pos = pos_f - cycle_length  # Head exiting
+        else:
+            pos_f = self._effect_pos_f % cycle_length
+            actual_pos = pos_f if pos_f < self.num_leds else cycle_length - pos_f
 
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
@@ -481,22 +550,131 @@ class NeoPixelController:
 
         # Comet parameters
         pos_f = self._effect_pos_f
-        num_comets = max(1, self.num_leds // 30)  # ~1 comet per 30 LEDs
-        spacing = self.num_leds // num_comets
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
         comet_len = 5  # Bright head length
 
-        for c in range(num_comets):
-            # Each comet is offset by spacing; they all advance with pos_f
-            head = (pos_f + c * spacing) % self.num_leds
+        if self._one_shot_active:
+            # Single comet, no wrapping
+            head = pos_f
             for j in range(comet_len):
-                pos = int(head - j) % self.num_leds
-                f = (comet_len - j) / comet_len * br
-                pr, pg, pb = int(er * f), int(eg * f), int(eb * f)
-                # Keep the brighter of existing vs new value (comets can overlap tails)
-                old_r, old_g, old_b = self.strip[pos]
-                self.strip[pos] = (max(old_r, pr), max(old_g, pg), max(old_b, pb))
+                pos = int(head - j)
+                if 0 <= pos < self.num_leds:
+                    f = (comet_len - j) / comet_len * br
+                    pr, pg, pb = int(er * f), int(eg * f), int(eb * f)
+                    old_r, old_g, old_b = self.strip[pos]
+                    self.strip[pos] = (max(old_r, pr), max(old_g, pg), max(old_b, pb))
+        else:
+            # Multiple comets with wrapping for loop mode
+            num_comets = max(1, self.num_leds // 30)  # ~1 comet per 30 LEDs
+            spacing = self.num_leds // num_comets
+            for c in range(num_comets):
+                # Each comet is offset by spacing; they all advance with pos_f
+                head = (pos_f + c * spacing) % self.num_leds
+                for j in range(comet_len):
+                    pos = int(head - j) % self.num_leds
+                    f = (comet_len - j) / comet_len * br
+                    pr, pg, pb = int(er * f), int(eg * f), int(eb * f)
+                    # Keep the brighter of existing vs new value (comets can overlap tails)
+                    old_r, old_g, old_b = self.strip[pos]
+                    self.strip[pos] = (max(old_r, pr), max(old_g, pg), max(old_b, pb))
+
+        self._show()
+
+    def _effect_chase_middle_out(self):
+        """Chase effect starting from the center going outward to both ends — sub-pixel smooth.
+        
+        pos_f = 0: Heads exactly at center
+        pos_f = half: Heads at edges
+        pos_f = half + chase_len: Tails have exited edges
+        """
+        half = self.num_leds / 2.0
+        chase_len = 8
+        
+        # In loop mode, wrap position
+        if self._one_shot_active:
+            pos_f = self._effect_pos_f
+        else:
+            cycle = half + chase_len
+            pos_f = self._effect_pos_f % cycle
+        
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+        center = (self.num_leds - 1) / 2.0  # Exact center point
+
+        for i in range(self.num_leds):
+            # Right head position: center + pos_f (moves right)
+            # Left head position: center - pos_f (moves left)
+            head_right = center + pos_f
+            head_left = center - pos_f
+            
+            # Distance from each head (tail trails behind)
+            # For right head: tail is to the left (smaller indices)
+            # For left head: tail is to the right (larger indices)
+            if i >= center:
+                # Right half - check right head
+                dist = head_right - i
+                if 0 <= dist < chase_len:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+                else:
+                    self.strip[i] = (0, 0, 0)
+            else:
+                # Left half - check left head
+                dist = i - head_left
+                if 0 <= dist < chase_len:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+                else:
+                    self.strip[i] = (0, 0, 0)
+
+        self._show()
+
+    def _effect_chase_outside_in(self):
+        """Chase effect starting from both ends going inward to the center — sub-pixel smooth.
+        
+        pos_f = -chase_len: Heads outside the strip (one-shot entry)
+        pos_f = 0: Heads at the edges (LED 0 and LED num_leds-1)
+        pos_f = half: Heads meet at center
+        pos_f = half + chase_len: Tails have finished at center
+        """
+        half = self.num_leds / 2.0
+        chase_len = 8
+        
+        # In loop mode, wrap position
+        if self._one_shot_active:
+            pos_f = self._effect_pos_f
+        else:
+            cycle = half + chase_len
+            pos_f = self._effect_pos_f % cycle
+        
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+        center = (self.num_leds - 1) / 2.0
+
+        for i in range(self.num_leds):
+            # Left head position: pos_f (starts at 0/negative, moves right toward center)
+            # Right head position: (num_leds - 1) - pos_f (starts at end, moves left toward center)
+            head_left = pos_f
+            head_right = (self.num_leds - 1) - pos_f
+            
+            # Distance from each head (tail trails behind)
+            if i <= center:
+                # Left half - check left head
+                dist = i - head_left
+                if 0 <= dist < chase_len:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+                else:
+                    self.strip[i] = (0, 0, 0)
+            else:
+                # Right half - check right head
+                dist = head_right - i
+                if 0 <= dist < chase_len:
+                    f = (chase_len - dist) / chase_len * br
+                    self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+                else:
+                    self.strip[i] = (0, 0, 0)
 
         self._show()
 
