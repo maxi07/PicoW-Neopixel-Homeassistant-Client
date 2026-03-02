@@ -10,9 +10,9 @@ from config_loader import Config
 from neopixel_controller import NeoPixelController
 
 # ── Settings ────────────────────────────────────────────
-EFFECT = NeoPixelController.EFFECT_CHASE_MIDDLE_OUT    # Effect to test
+EFFECT = NeoPixelController.EFFECT_RAINBOW    # Effect to test
 BRIGHTNESS = 50                               # 0-100
-SPEED = 100                                    # 1-100
+SPEED = 80                                    # 1-100
 COLOR = (255, 0, 0)                           # RGB color (used by chase, breathing, scanner, twinkle, strobe)
 DURATION_SECONDS = 10                         # How long to loop the animation
 # ────────────────────────────────────────────────────────

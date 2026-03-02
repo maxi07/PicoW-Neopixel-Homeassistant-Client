@@ -237,18 +237,18 @@ class NeoPixelController:
 
         Produces a float increment per 16ms render frame.
         Quadratic curve: slow crawl at low speed, fast but still
-        coherent at high speed (max ~3.5 LEDs/frame).
+        coherent at high speed (max ~10.5 LEDs/frame).
 
         Examples:
             1%  → 0.02 inc  (~1.2 LEDs/s, very slow)
-           25%  → 0.24 inc  (~15 LEDs/s)
-           50%  → 0.90 inc  (~56 LEDs/s)
-           75%  → 2.0  inc  (~125 LEDs/s)
-          100%  → 3.5  inc  (~219 LEDs/s)
+           25%  → 0.68 inc  (~42 LEDs/s)
+           50%  → 2.65 inc  (~165 LEDs/s)
+           75%  → 5.9  inc  (~370 LEDs/s)
+          100%  → 10.5 inc  (~656 LEDs/s)
         """
         self.effect_speed = max(1, min(100, speed))
         sf = (self.effect_speed / 100.0) ** 2
-        self._speed_inc = 0.02 + sf * 3.5
+        self._speed_inc = 0.02 + sf * 10.5
         # Legacy fields (kept for state save/restore)
         self.step_size = 1
         self.update_interval = max(1, int(self.RENDER_MS / self._speed_inc))
