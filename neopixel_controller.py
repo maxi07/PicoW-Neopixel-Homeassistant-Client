@@ -448,7 +448,8 @@ class NeoPixelController:
             pos_f = self._effect_pos_f % self.num_leds
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
-        chase_len = 8
+        # Dynamic tail length: base 8 + speed increment to stay smooth at high speeds
+        chase_len = 8 + self._speed_inc
 
         for i in range(self.num_leds):
             # For one-shot: use direct distance, for loop: use modulo distance
@@ -519,7 +520,8 @@ class NeoPixelController:
 
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
-        head_len = 8
+        # Dynamic head length: base 8 + speed increment to stay smooth at high speeds
+        head_len = 8 + self._speed_inc
 
         for i in range(self.num_leds):
             dist = abs(actual_pos - i)
@@ -589,7 +591,8 @@ class NeoPixelController:
         pos_f = half + chase_len: Tails have exited edges
         """
         half = self.num_leds / 2.0
-        chase_len = 8
+        # Dynamic tail length: base 8 + speed increment to stay smooth at high speeds
+        chase_len = 8 + self._speed_inc
         
         # In loop mode, wrap position
         if self._one_shot_active:
@@ -639,7 +642,8 @@ class NeoPixelController:
         pos_f = half + chase_len: Tails have finished at center
         """
         half = self.num_leds / 2.0
-        chase_len = 8
+        # Dynamic tail length: base 8 + speed increment to stay smooth at high speeds
+        chase_len = 8 + self._speed_inc
         
         # In loop mode, wrap position
         if self._one_shot_active:
