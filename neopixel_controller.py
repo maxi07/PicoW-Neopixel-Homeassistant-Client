@@ -48,13 +48,16 @@ class NeoPixelController:
 
             # Animation state
             self.effect_step = 0
+            self._effect_pos_f = 0.0  # Float position for sub-pixel smooth rendering
             self.last_update = 0
             self.update_interval = 50  # milliseconds
 
             # Effect parameters
             self.effect_speed = 50  # Default speed
             self.effect_color = self.current_color  # Sync with current_color
-            self.step_size = 1  # Steps per animation frame (increases with speed)
+            self._speed_inc = 0.9   # Float increment per render frame
+            self.step_size = 1      # Legacy (always 1 now)
+            self.update_interval = 16  # Legacy
 
             # Core 1 animation state
             self._animation_running = False
@@ -75,6 +78,20 @@ class NeoPixelController:
         """Apply brightness adjustment to color (allocation-free)"""
         factor = self.brightness / 100.0
         return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
+
+    def _fade_pixel(self, i, tr, tg, tb, rate):
+        """Smoothly fade LED i toward target color (tr, tg, tb).
+
+        rate: fraction (0.0-1.0) to move toward target per frame.
+        Guarantees convergence by ensuring a minimum step of 1.
+        """
+        cr, cg, cb = self.strip[i]
+        dr = tr - cr; dg = tg - cg; db = tb - cb
+        sr = int(dr * rate); sg = int(dg * rate); sb = int(db * rate)
+        if dr and not sr: sr = 1 if dr > 0 else -1
+        if dg and not sg: sg = 1 if dg > 0 else -1
+        if db and not sb: sb = 1 if db > 0 else -1
+        self.strip[i] = (cr + sr, cg + sg, cb + sb)
 
     def _set_all(self, color):
         """Set all LEDs to same color"""
@@ -104,8 +121,16 @@ class NeoPixelController:
         self._animation_running = False
         logger.info("Animation loop stopping...")
 
+    # Fixed render interval — always ~60 FPS regardless of effect speed
+    RENDER_MS = 16
+
     def _animation_loop(self):
-        """Dedicated animation loop running on Core 1 — sole owner of strip writes."""
+        """Dedicated animation loop running on Core 1 — sole owner of strip writes.
+
+        Always renders at ~60 FPS (RENDER_MS).  _effect_pos_f advances by a
+        fractional amount every frame based on speed, giving sub-pixel smooth
+        movement.  effect_step (int) is derived for one-shot tracking.
+        """
         logger.info("Core 1: Animation loop running")
         gc_counter = 0
         try:
@@ -126,9 +151,22 @@ class NeoPixelController:
                         self._show()
                         self._needs_refresh = False
 
-                    self.update()
-                    # Sleep based on update_interval for precise timing
-                    time.sleep_ms(max(1, self.update_interval))
+                    # --- Advance float position every frame ---
+                    old_step = self.effect_step
+                    self._effect_pos_f += self._speed_inc
+                    self.effect_step = int(self._effect_pos_f)
+
+                    # One-shot tracking (count integer steps advanced)
+                    steps_advanced = self.effect_step - old_step
+                    if self._one_shot_active and steps_advanced > 0:
+                        self._one_shot_steps_remaining -= steps_advanced
+                        if self._one_shot_steps_remaining <= 0:
+                            self._restore_state()
+
+                    # --- Render every frame at ~60 FPS ---
+                    self._render_effect()
+
+                    time.sleep_ms(self.RENDER_MS)
 
                     # Periodic GC on Core 1 (every ~100 frames)
                     gc_counter += 1
@@ -145,8 +183,12 @@ class NeoPixelController:
             self._animation_running = False
             logger.info("Core 1: Animation loop stopped")
 
-    def update(self):
-        """Update animation frame - called by animation loop on Core 1"""
+    def _render_effect(self):
+        """Render current effect frame — called at ~60 FPS by animation loop.
+
+        effect_step is advanced by the animation loop, NOT by effects.
+        Effects only read effect_step and render accordingly.
+        """
         if not self.is_on:
             return
 
@@ -169,14 +211,8 @@ class NeoPixelController:
                 self._effect_strobe()
             elif self.current_effect == self.EFFECT_COMET:
                 self._effect_comet()
-
-            # Track one-shot progress and restore state when complete
-            if self._one_shot_active:
-                self._one_shot_steps_remaining -= self.step_size
-                if self._one_shot_steps_remaining <= 0:
-                    self._restore_state()
         except Exception as e:
-            logger.error("Effect update failed: {}".format(e))
+            logger.error("Effect render failed: {}".format(e))
 
     def set_color(self, r, g, b):
         """Set static color (state only — Core 1 renders)"""
@@ -191,31 +227,25 @@ class NeoPixelController:
             logger.error("Failed to set color: {}".format(e))
 
     def _calc_speed_params(self, speed):
-        """Calculate update_interval and step_size from speed (1-100).
+        """Calculate _speed_inc from speed (1-100).
 
-        Uses a quadratic curve for the interval so high speeds get very short
-        intervals (= smooth) while low speeds stay perceptibly slow.
-        step_size stays at 1 for most of the range to avoid visible jumps;
-        only at extreme speeds (>80%) a mild multiplier kicks in.
+        Produces a float increment per 16ms render frame.
+        Quadratic curve: slow crawl at low speed, fast but still
+        coherent at high speed (max ~3.5 LEDs/frame).
 
         Examples:
-            1%  → 490ms, step=1  (very slow)
-           25%  → 281ms, step=1
-           50%  → 125ms, step=1  (moderate, ~8 fps)
-           75%  →  31ms, step=1  (fast, ~32 fps)
-           80%  →  20ms, step=1  (smooth, ~50 fps)
-           90%  →   5ms, step=2  (~400 effective steps/s)
-          100%  →   1ms, step=3  (~3000 effective steps/s)
+            1%  → 0.02 inc  (~1.2 LEDs/s, very slow)
+           25%  → 0.24 inc  (~15 LEDs/s)
+           50%  → 0.90 inc  (~56 LEDs/s)
+           75%  → 2.0  inc  (~125 LEDs/s)
+          100%  → 3.5  inc  (~219 LEDs/s)
         """
         self.effect_speed = max(1, min(100, speed))
-        # Quadratic curve: interval drops steeply at high speeds
-        inv = (100 - self.effect_speed) / 100.0
-        self.update_interval = max(1, int(500 * inv * inv))
-        # Gentle step multiplier only at extreme speeds for extra boost
-        if self.effect_speed <= 80:
-            self.step_size = 1
-        else:
-            self.step_size = 1 + (self.effect_speed - 80) // 10  # 81-90→2, 91-100→3
+        sf = (self.effect_speed / 100.0) ** 2
+        self._speed_inc = 0.02 + sf * 3.5
+        # Legacy fields (kept for state save/restore)
+        self.step_size = 1
+        self.update_interval = max(1, int(self.RENDER_MS / self._speed_inc))
 
     def set_effect(self, effect_name, speed=50):
         """Start an effect (state only — Core 1 renders)"""
@@ -223,9 +253,10 @@ class NeoPixelController:
             self.is_on = True
             self.current_effect = effect_name
             self.effect_step = 0
+            self._effect_pos_f = 0.0
             self._calc_speed_params(speed)
             self._needs_refresh = True
-            logger.info("Effect started: {} (speed: {}, step_size: {})".format(effect_name, speed, self.step_size))
+            logger.info("Effect started: {} (speed: {}, inc: {})".format(effect_name, speed, self._speed_inc))
         except Exception as e:
             logger.error("Failed to set effect: {}".format(e))
 
@@ -260,7 +291,7 @@ class NeoPixelController:
         """Set animation speed (1-100) without changing the current effect"""
         try:
             self._calc_speed_params(speed)
-            logger.info("Animation speed set to {}% (step_size: {})".format(self.effect_speed, self.step_size))
+            logger.info("Animation speed set to {}% (inc: {})".format(self.effect_speed, self._speed_inc))
         except Exception as e:
             logger.error("Failed to set speed: {}".format(e))
 
@@ -298,6 +329,7 @@ class NeoPixelController:
                     'effect_color': self.effect_color,
                     'brightness': self.brightness,
                     'effect_speed': self.effect_speed,
+                    '_speed_inc': self._speed_inc,
                     'update_interval': self.update_interval,
                     'step_size': self.step_size,
                 }
@@ -306,6 +338,7 @@ class NeoPixelController:
             self.is_on = True
             self.current_effect = effect
             self.effect_step = 0
+            self._effect_pos_f = 0.0
             if color:
                 self.effect_color = color
                 self.current_color = color
@@ -327,6 +360,7 @@ class NeoPixelController:
                 self.effect_color = self._saved_state['effect_color']
                 self.brightness = self._saved_state['brightness']
                 self.effect_speed = self._saved_state['effect_speed']
+                self._speed_inc = self._saved_state['_speed_inc']
                 self.update_interval = self._saved_state['update_interval']
                 self.step_size = self._saved_state['step_size']
                 self._saved_state = None
@@ -348,77 +382,85 @@ class NeoPixelController:
     def _effect_rainbow(self):
         """Rainbow cycle effect"""
         br = self.brightness / 100.0
+        pos_f = self._effect_pos_f
         for i in range(self.num_leds):
-            hue = (i * 256 // self.num_leds + self.effect_step) % 256
-            r, g, b = self._hsv_to_rgb(hue / 256.0, 1.0, 1.0)
+            hue = ((i * 256.0 / self.num_leds + pos_f) % 256) / 256.0
+            r, g, b = self._hsv_to_rgb(hue, 1.0, 1.0)
             self.strip[i] = (int(r * br), int(g * br), int(b * br))
         self._show()
-        self.effect_step = (self.effect_step + self.step_size) % 256
 
     def _effect_fade(self):
         """Color fade effect"""
-        hue = self.effect_step / 256.0
+        hue = (self._effect_pos_f % 256.0) / 256.0
         color = self._hsv_to_rgb(hue, 1.0, 1.0)
         self._set_all(color)
         self._show()
-        self.effect_step = (self.effect_step + self.step_size) % 256
 
     def _effect_chase(self):
-        """Chase/running light effect"""
-        self._set_all(self.COLOR_OFF)
-        pos = self.effect_step % self.num_leds
-        for i in range(5):  # 5 LEDs in the chase
-            led_pos = (pos + i) % self.num_leds
-            self.strip[led_pos] = self._apply_brightness(self.effect_color)
+        """Chase/running light effect — sub-pixel smooth"""
+        pos_f = self._effect_pos_f % self.num_leds
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+        chase_len = 8
+
+        for i in range(self.num_leds):
+            dist = (pos_f - i) % self.num_leds
+            if dist < chase_len:
+                f = (chase_len - dist) / chase_len * br
+                self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+            else:
+                self.strip[i] = (0, 0, 0)
+
         self._show()
-        self.effect_step += self.step_size
 
     def _effect_breathing(self):
         """Breathing effect (pulsing brightness)"""
-        breath = (math.sin(self.effect_step / 20.0) + 1) / 2  # 0-1
+        breath = (math.sin(self._effect_pos_f / 20.0) + 1) / 2  # 0-1
         temp_brightness = self.brightness
         self.brightness = int(breath * temp_brightness)
         self._set_all(self.effect_color)
         self._show()
         self.brightness = temp_brightness
-        self.effect_step += self.step_size
 
     def _effect_twinkle(self):
-        """Twinkle/sparkle effect"""
-        if self.effect_step % 3 == 0:  # Update some LEDs
-            color_on = self._apply_brightness(self.effect_color)
-            for _ in range(self.num_leds // 10):  # 10% of LEDs
+        """Twinkle/sparkle effect with smooth LED fading"""
+        color_on = self._apply_brightness(self.effect_color)
+        tr, tg, tb = color_on
+
+        # Decay all LEDs toward off (~0.93^60 ≈ 0.01/s → fade in ~0.5s)
+        decay = 0.93
+        for i in range(self.num_leds):
+            r, g, b = self.strip[i]
+            self.strip[i] = (int(r * decay), int(g * decay), int(b * decay))
+
+        # Randomly spark a few LEDs to full brightness instantly
+        num_sparkles = max(1, self.num_leds // 20)
+        for _ in range(num_sparkles):
+            if random.random() > 0.7:
                 led = random.randint(0, self.num_leds - 1)
-                if random.random() > 0.5:
-                    self.strip[led] = color_on
-                else:
-                    self.strip[led] = self.COLOR_OFF
-            self._show()
-        self.effect_step += self.step_size
-
-    def _effect_scanner(self):
-        """Scanner effect (Knight Rider style)"""
-        self._set_all(self.COLOR_OFF)
-
-        cycle_length = (self.num_leds - 1) * 2
-        pos = self.effect_step % cycle_length
-
-        if pos < self.num_leds:
-            actual_pos = pos
-        else:
-            actual_pos = cycle_length - pos
-
-        # Draw scanner with tail (avoid tuple allocation in loop)
-        er, eg, eb = self.effect_color
-        br = self.brightness / 100.0
-        for i in range(5):
-            led_pos = actual_pos - i
-            if 0 <= led_pos < self.num_leds:
-                f = (5 - i) / 5.0 * br
-                self.strip[led_pos] = (int(er * f), int(eg * f), int(eb * f))
+                self.strip[led] = (tr, tg, tb)
 
         self._show()
-        self.effect_step += self.step_size
+
+    def _effect_scanner(self):
+        """Scanner effect (Knight Rider style) — sub-pixel smooth"""
+        cycle_length = (self.num_leds - 1) * 2
+        pos_f = self._effect_pos_f % cycle_length
+        actual_pos = pos_f if pos_f < self.num_leds else cycle_length - pos_f
+
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+        head_len = 8
+
+        for i in range(self.num_leds):
+            dist = abs(actual_pos - i)
+            if dist < head_len:
+                f = (head_len - dist) / head_len * br
+                self.strip[i] = (int(er * f), int(eg * f), int(eb * f))
+            else:
+                self.strip[i] = (0, 0, 0)
+
+        self._show()
 
     def _effect_strobe(self):
         """Strobe effect"""
@@ -427,17 +469,18 @@ class NeoPixelController:
         else:
             self._set_all(self.COLOR_OFF)
         self._show()
-        self.effect_step += self.step_size
 
     def _effect_comet(self):
         """Comet effect — multiple comets with fading tails racing across the strip."""
-        # Dim the entire strip to create fading tails
-        decay = 0.6  # Tail fade factor (lower = shorter tail)
+        # Speed-dependent decay: tail stays ~15 LEDs visually regardless of speed
+        # 0.85^speed_inc: slow speed → high decay (long tail ok), fast → aggressive decay
+        decay = 0.85 ** self._speed_inc
         for i in range(self.num_leds):
             r, g, b = self.strip[i]
             self.strip[i] = (int(r * decay), int(g * decay), int(b * decay))
 
         # Comet parameters
+        pos_f = self._effect_pos_f
         num_comets = max(1, self.num_leds // 30)  # ~1 comet per 30 LEDs
         spacing = self.num_leds // num_comets
         er, eg, eb = self.effect_color
@@ -445,10 +488,10 @@ class NeoPixelController:
         comet_len = 5  # Bright head length
 
         for c in range(num_comets):
-            # Each comet is offset by spacing; they all advance with effect_step
-            head = (self.effect_step + c * spacing) % self.num_leds
+            # Each comet is offset by spacing; they all advance with pos_f
+            head = (pos_f + c * spacing) % self.num_leds
             for j in range(comet_len):
-                pos = (head - j) % self.num_leds
+                pos = int(head - j) % self.num_leds
                 f = (comet_len - j) / comet_len * br
                 pr, pg, pb = int(er * f), int(eg * f), int(eb * f)
                 # Keep the brighter of existing vs new value (comets can overlap tails)
@@ -456,7 +499,6 @@ class NeoPixelController:
                 self.strip[pos] = (max(old_r, pr), max(old_g, pg), max(old_b, pb))
 
         self._show()
-        self.effect_step += self.step_size
 
     def _hsv_to_rgb(self, h, s, v):
         """Convert HSV to RGB color"""
