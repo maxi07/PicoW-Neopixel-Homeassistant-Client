@@ -27,6 +27,10 @@ class NeoPixelController:
     EFFECT_COMET = "comet"
     EFFECT_CHASE_MIDDLE_OUT = "chase_middle_out"
     EFFECT_CHASE_OUTSIDE_IN = "chase_outside_in"
+    EFFECT_FILL_MIDDLE_OUT = "fill_middle_out"      # Turn on from center outward
+    EFFECT_FILL_OUTSIDE_IN = "fill_outside_in"      # Turn on from edges inward
+    EFFECT_UNFILL_MIDDLE_OUT = "unfill_middle_out"  # Turn off from center outward
+    EFFECT_UNFILL_OUTSIDE_IN = "unfill_outside_in"  # Turn off from edges inward
 
     # Status colors
     COLOR_BOOT = (255, 165, 0)      # Orange - Boot animation
@@ -217,6 +221,14 @@ class NeoPixelController:
                 self._effect_chase_middle_out()
             elif self.current_effect == self.EFFECT_CHASE_OUTSIDE_IN:
                 self._effect_chase_outside_in()
+            elif self.current_effect == self.EFFECT_FILL_MIDDLE_OUT:
+                self._effect_fill_middle_out()
+            elif self.current_effect == self.EFFECT_FILL_OUTSIDE_IN:
+                self._effect_fill_outside_in()
+            elif self.current_effect == self.EFFECT_UNFILL_MIDDLE_OUT:
+                self._effect_unfill_middle_out()
+            elif self.current_effect == self.EFFECT_UNFILL_OUTSIDE_IN:
+                self._effect_unfill_outside_in()
         except Exception as e:
             logger.error("Effect render failed: {}".format(e))
 
@@ -354,6 +366,18 @@ class NeoPixelController:
             # Head starts outside (-chase_len), moves to center, tail finishes at center
             # Total distance: chase_len (entry) + half (to center) + chase_len (tail to finish)
             return (self.num_leds + 1) // 2 + 2 * 8
+        elif effect == self.EFFECT_FILL_MIDDLE_OUT:
+            # Fill from center to edges - half strip distance
+            return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_FILL_OUTSIDE_IN:
+            # Fill from edges to center - half strip distance
+            return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_UNFILL_MIDDLE_OUT:
+            # Unfill from center to edges - half strip distance
+            return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_UNFILL_OUTSIDE_IN:
+            # Unfill from edges to center - half strip distance
+            return (self.num_leds + 1) // 2
         return 100  # Fallback
 
     def play_once(self, effect, speed=50, color=None):
@@ -680,6 +704,94 @@ class NeoPixelController:
                 else:
                     self.strip[i] = (0, 0, 0)
 
+        self._show()
+
+    def _effect_fill_middle_out(self):
+        """Fill effect: LEDs turn on from center outward.
+        
+        pos_f = 0: No LEDs on
+        pos_f = half: All LEDs on
+        Used as transition to turn ON the strip.
+        """
+        pos_f = self._effect_pos_f
+        center = (self.num_leds - 1) / 2.0
+        color = self._apply_brightness(self.effect_color)
+        
+        for i in range(self.num_leds):
+            # Distance from center
+            dist_from_center = abs(i - center)
+            # LED is on if the "fill line" has passed it
+            if dist_from_center <= pos_f:
+                self.strip[i] = color
+            else:
+                self.strip[i] = (0, 0, 0)
+        
+        self._show()
+
+    def _effect_fill_outside_in(self):
+        """Fill effect: LEDs turn on from edges inward to center.
+        
+        pos_f = 0: No LEDs on
+        pos_f = half: All LEDs on
+        Used as transition to turn ON the strip.
+        """
+        pos_f = self._effect_pos_f
+        half = (self.num_leds - 1) / 2.0
+        color = self._apply_brightness(self.effect_color)
+        
+        for i in range(self.num_leds):
+            # Distance from nearest edge
+            dist_from_edge = min(i, self.num_leds - 1 - i)
+            # LED is on if the "fill line" has passed it (from edge)
+            if dist_from_edge <= pos_f:
+                self.strip[i] = color
+            else:
+                self.strip[i] = (0, 0, 0)
+        
+        self._show()
+
+    def _effect_unfill_middle_out(self):
+        """Unfill effect: LEDs turn off from center outward.
+        
+        pos_f = 0: All LEDs on
+        pos_f = half: All LEDs off
+        Used as transition to turn OFF the strip.
+        """
+        pos_f = self._effect_pos_f
+        center = (self.num_leds - 1) / 2.0
+        color = self._apply_brightness(self.effect_color)
+        
+        for i in range(self.num_leds):
+            # Distance from center
+            dist_from_center = abs(i - center)
+            # LED is OFF if the "unfill line" has passed it (from center)
+            if dist_from_center < pos_f:
+                self.strip[i] = (0, 0, 0)
+            else:
+                self.strip[i] = color
+        
+        self._show()
+
+    def _effect_unfill_outside_in(self):
+        """Unfill effect: LEDs turn off from edges inward to center.
+        
+        pos_f = 0: All LEDs on
+        pos_f = half: All LEDs off
+        Used as transition to turn OFF the strip.
+        """
+        pos_f = self._effect_pos_f
+        half = (self.num_leds - 1) / 2.0
+        color = self._apply_brightness(self.effect_color)
+        
+        for i in range(self.num_leds):
+            # Distance from nearest edge
+            dist_from_edge = min(i, self.num_leds - 1 - i)
+            # LED is OFF if the "unfill line" has passed it (from edge)
+            if dist_from_edge < pos_f:
+                self.strip[i] = (0, 0, 0)
+            else:
+                self.strip[i] = color
+        
         self._show()
 
     def _hsv_to_rgb(self, h, s, v):
