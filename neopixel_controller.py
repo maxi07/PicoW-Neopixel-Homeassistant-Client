@@ -92,11 +92,18 @@ class NeoPixelController:
         Guarantees convergence by ensuring a minimum step of 1.
         """
         cr, cg, cb = self.strip[i]
-        dr = tr - cr; dg = tg - cg; db = tb - cb
-        sr = int(dr * rate); sg = int(dg * rate); sb = int(db * rate)
-        if dr and not sr: sr = 1 if dr > 0 else -1
-        if dg and not sg: sg = 1 if dg > 0 else -1
-        if db and not sb: sb = 1 if db > 0 else -1
+        dr = tr - cr
+        dg = tg - cg
+        db = tb - cb
+        sr = int(dr * rate)
+        sg = int(dg * rate)
+        sb = int(db * rate)
+        if dr and not sr:
+            sr = 1 if dr > 0 else -1
+        if dg and not sg:
+            sg = 1 if dg > 0 else -1
+        if db and not sb:
+            sb = 1 if db > 0 else -1
         self.strip[i] = (cr + sr, cg + sg, cb + sb)
 
     def _set_all(self, color):
@@ -317,7 +324,7 @@ class NeoPixelController:
 
     def _get_effect_tail_length(self, effect):
         """Get the tail/head length for effects that have one.
-        
+
         This is the ENTRY padding - how much the head starts outside the strip.
         """
         if effect == self.EFFECT_CHASE:
@@ -334,11 +341,11 @@ class NeoPixelController:
 
     def _get_one_shot_cycle_length(self, effect):
         """Get the number of steps for one complete cycle of an effect.
-        
+
         Includes padding for tail effects so animation fully enters and exits.
         """
         padding = self._get_effect_tail_length(effect)
-        
+
         if effect == self.EFFECT_RAINBOW:
             return 256
         elif effect == self.EFFECT_FADE:
@@ -400,7 +407,7 @@ class NeoPixelController:
             # Configure one-shot effect
             self.is_on = True
             self.current_effect = effect
-            
+
             # Start with negative offset for effects with tails
             # This makes the animation "enter" from outside the visible strip
             padding = self._get_effect_tail_length(effect)
@@ -609,7 +616,7 @@ class NeoPixelController:
 
     def _effect_chase_middle_out(self):
         """Chase effect starting from the center going outward to both ends — sub-pixel smooth.
-        
+
         pos_f = 0: Heads exactly at center
         pos_f = half: Heads at edges
         pos_f = half + chase_len: Tails have exited edges
@@ -617,14 +624,14 @@ class NeoPixelController:
         half = self.num_leds / 2.0
         # Dynamic tail length: base 8 + speed increment to stay smooth at high speeds
         chase_len = 8 + self._speed_inc
-        
+
         # In loop mode, wrap position
         if self._one_shot_active:
             pos_f = self._effect_pos_f
         else:
             cycle = half + chase_len
             pos_f = self._effect_pos_f % cycle
-        
+
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
         center = (self.num_leds - 1) / 2.0  # Exact center point
@@ -634,7 +641,7 @@ class NeoPixelController:
             # Left head position: center - pos_f (moves left)
             head_right = center + pos_f
             head_left = center - pos_f
-            
+
             # Distance from each head (tail trails behind)
             # For right head: tail is to the left (smaller indices)
             # For left head: tail is to the right (larger indices)
@@ -659,7 +666,7 @@ class NeoPixelController:
 
     def _effect_chase_outside_in(self):
         """Chase effect starting from both ends going inward to the center — sub-pixel smooth.
-        
+
         pos_f = -chase_len: Heads outside the strip (one-shot entry)
         pos_f = 0: Heads at the edges (LED 0 and LED num_leds-1)
         pos_f = half: Heads meet at center
@@ -668,14 +675,14 @@ class NeoPixelController:
         half = self.num_leds / 2.0
         # Dynamic tail length: base 8 + speed increment to stay smooth at high speeds
         chase_len = 8 + self._speed_inc
-        
+
         # In loop mode, wrap position
         if self._one_shot_active:
             pos_f = self._effect_pos_f
         else:
             cycle = half + chase_len
             pos_f = self._effect_pos_f % cycle
-        
+
         er, eg, eb = self.effect_color
         br = self.brightness / 100.0
         center = (self.num_leds - 1) / 2.0
@@ -685,7 +692,7 @@ class NeoPixelController:
             # Right head position: (num_leds - 1) - pos_f (starts at end, moves left toward center)
             head_left = pos_f
             head_right = (self.num_leds - 1) - pos_f
-            
+
             # Distance from each head (tail trails behind)
             if i <= center:
                 # Left half - check left head
@@ -708,7 +715,7 @@ class NeoPixelController:
 
     def _effect_fill_middle_out(self):
         """Fill effect: LEDs turn on from center outward.
-        
+
         pos_f = 0: No LEDs on
         pos_f = half: All LEDs on
         Used as transition to turn ON the strip.
@@ -716,7 +723,7 @@ class NeoPixelController:
         pos_f = self._effect_pos_f
         center = (self.num_leds - 1) / 2.0
         color = self._apply_brightness(self.effect_color)
-        
+
         for i in range(self.num_leds):
             # Distance from center
             dist_from_center = abs(i - center)
@@ -725,20 +732,19 @@ class NeoPixelController:
                 self.strip[i] = color
             else:
                 self.strip[i] = (0, 0, 0)
-        
+
         self._show()
 
     def _effect_fill_outside_in(self):
         """Fill effect: LEDs turn on from edges inward to center.
-        
+
         pos_f = 0: No LEDs on
         pos_f = half: All LEDs on
         Used as transition to turn ON the strip.
         """
         pos_f = self._effect_pos_f
-        half = (self.num_leds - 1) / 2.0
         color = self._apply_brightness(self.effect_color)
-        
+
         for i in range(self.num_leds):
             # Distance from nearest edge
             dist_from_edge = min(i, self.num_leds - 1 - i)
@@ -747,12 +753,12 @@ class NeoPixelController:
                 self.strip[i] = color
             else:
                 self.strip[i] = (0, 0, 0)
-        
+
         self._show()
 
     def _effect_unfill_middle_out(self):
         """Unfill effect: LEDs turn off from center outward.
-        
+
         pos_f = 0: All LEDs on
         pos_f = half: All LEDs off
         Used as transition to turn OFF the strip.
@@ -760,7 +766,7 @@ class NeoPixelController:
         pos_f = self._effect_pos_f
         center = (self.num_leds - 1) / 2.0
         color = self._apply_brightness(self.effect_color)
-        
+
         for i in range(self.num_leds):
             # Distance from center
             dist_from_center = abs(i - center)
@@ -769,20 +775,19 @@ class NeoPixelController:
                 self.strip[i] = (0, 0, 0)
             else:
                 self.strip[i] = color
-        
+
         self._show()
 
     def _effect_unfill_outside_in(self):
         """Unfill effect: LEDs turn off from edges inward to center.
-        
+
         pos_f = 0: All LEDs on
         pos_f = half: All LEDs off
         Used as transition to turn OFF the strip.
         """
         pos_f = self._effect_pos_f
-        half = (self.num_leds - 1) / 2.0
         color = self._apply_brightness(self.effect_color)
-        
+
         for i in range(self.num_leds):
             # Distance from nearest edge
             dist_from_edge = min(i, self.num_leds - 1 - i)
@@ -791,7 +796,7 @@ class NeoPixelController:
                 self.strip[i] = (0, 0, 0)
             else:
                 self.strip[i] = color
-        
+
         self._show()
 
     def _hsv_to_rgb(self, h, s, v):

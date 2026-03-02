@@ -176,4 +176,3 @@ class NetworkManager:
             return None
         except Exception:
             return None
-
