@@ -34,6 +34,7 @@ class NeoPixelController:
     EFFECT_TRANSITION_MIDDLE_OUT = "transition_middle_out"  # Color transition from center
     EFFECT_TRANSITION_OUTSIDE_IN = "transition_outside_in"  # Color transition from edges
     EFFECT_TRANSITION_FADE = "transition_fade"              # Smooth color crossfade
+    EFFECT_PROGRESS_BAR = "progress_bar"                    # Progress bar visualization
 
     # Status colors
     COLOR_BOOT = (255, 165, 0)      # Orange - Boot animation
@@ -60,6 +61,11 @@ class NeoPixelController:
             self._effect_pos_f = 0.0  # Float position for sub-pixel smooth rendering
             self.last_update = 0
             self.update_interval = 50  # milliseconds
+
+            # Progress bar state
+            self.progress_value = 0  # 0-100 percentage (target)
+            self._progress_display = 0.0  # Currently displayed progress (animated float)
+            self._progress_snap = False  # Flag: Core 1 should snap display to target
 
             # Effect parameters
             self.effect_speed = 50  # Default speed
@@ -164,12 +170,6 @@ class NeoPixelController:
                         time.sleep_ms(50)
                         continue
 
-                    # Process immediate refresh (color/brightness change)
-                    if self._needs_refresh and self.current_effect == self.EFFECT_STATIC:
-                        self._set_all(self.current_color)
-                        self._show()
-                        self._needs_refresh = False
-
                     # --- Advance float position every frame ---
                     old_step = self.effect_step
                     self._effect_pos_f += self._speed_inc
@@ -213,7 +213,10 @@ class NeoPixelController:
 
         try:
             if self.current_effect == self.EFFECT_STATIC:
-                return  # Static needs no per-frame update
+                self._set_all(self.current_color)
+                self._show()
+            elif self.current_effect == self.EFFECT_PROGRESS_BAR:
+                self._effect_progress_bar()
             elif self.current_effect == self.EFFECT_RAINBOW:
                 self._effect_rainbow()
             elif self.current_effect == self.EFFECT_FADE:
@@ -298,6 +301,12 @@ class NeoPixelController:
             self.effect_step = 0
             self._effect_pos_f = 0.0
             self._calc_speed_params(speed)
+
+            # When switching to progress bar, snap display to current value
+            if effect_name == self.EFFECT_PROGRESS_BAR:
+                self._progress_display = float(self.progress_value)
+                self._progress_snap = True
+
             self._needs_refresh = True
             logger.info("Effect started: {} (speed: {}, inc: {})".format(effect_name, speed, self._speed_inc))
         except Exception as e:
@@ -956,6 +965,60 @@ class NeoPixelController:
 
         return (int(r * 255), int(g * 255), int(b * 255))
 
+    def _effect_progress_bar(self):
+        """Progress bar effect with smooth LED-by-LED transitions.
+
+        Animates _progress_display toward progress_value each frame.
+        Uses sub-pixel rendering at the boundary for a smooth fill.
+        Transition speed: ~0.5% per frame @ 60 FPS → full bar in ~3.3s.
+        """
+        target = float(self.progress_value)
+
+        # Snap display to target immediately (cross-core safe via flag)
+        snapped = False
+        if self._progress_snap:
+            self._progress_display = target
+            self._progress_snap = False
+            snapped = True
+
+        diff = target - self._progress_display
+
+        # Skip render when display matches target and no refresh pending
+        # Always render after a snap to guarantee the first frame is drawn
+        if abs(diff) < 0.01 and not self._needs_refresh and not snapped:
+            return
+
+        # Smoothly move display toward target (~30%/s at 60 FPS)
+        if abs(diff) < 0.05:
+            self._progress_display = target
+        else:
+            rate = 0.5  # percent per frame
+            if diff > 0:
+                self._progress_display = min(target, self._progress_display + rate)
+            else:
+                self._progress_display = max(target, self._progress_display - rate)
+
+        self._needs_refresh = False
+
+        er, eg, eb = self.effect_color
+        br = self.brightness / 100.0
+
+        # Calculate how many LEDs should be lit (float for sub-pixel)
+        fill_f = (self._progress_display / 100.0) * self.num_leds
+
+        for i in range(self.num_leds):
+            if i < int(fill_f):
+                # Fully lit LED
+                self.strip[i] = (int(er * br), int(eg * br), int(eb * br))
+            elif i < fill_f:
+                # Boundary LED — partial brightness for smooth transition
+                frac = fill_f - int(fill_f)
+                self.strip[i] = (int(er * br * frac), int(eg * br * frac), int(eb * br * frac))
+            else:
+                # Off
+                self.strip[i] = (0, 0, 0)
+        self._show()
+
     def show_status(self, status):
         """Show status color (blocking animation for boot/error states)"""
         try:
@@ -1006,6 +1069,15 @@ class NeoPixelController:
         except Exception as e:
             logger.error("Failed to show status: {}".format(e))
 
+    def set_progress(self, value):
+        """Set progress bar value (0-100)"""
+        try:
+            self.progress_value = max(0, min(100, value))
+            self._needs_refresh = True
+            logger.info("Progress set to {}%".format(self.progress_value))
+        except Exception as e:
+            logger.error("Failed to set progress: {}".format(e))
+
     def get_state(self):
         """Get current state for reporting to Home Assistant"""
         # During one-shot, report the saved (persistent) state
@@ -1020,6 +1092,7 @@ class NeoPixelController:
                     "g": self._saved_state['color'][1],
                     "b": self._saved_state['color'][2]
                 },
+                "progress": self.progress_value,
                 "one_shot_active": True,
                 "one_shot_effect": self.current_effect,
             }
@@ -1033,6 +1106,7 @@ class NeoPixelController:
                 "g": self.current_color[1],
                 "b": self.current_color[2]
             },
+            "progress": self.progress_value,
             "one_shot_active": False,
         }
 

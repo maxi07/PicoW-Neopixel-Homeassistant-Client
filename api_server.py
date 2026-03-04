@@ -234,6 +234,12 @@ class APIServer:
                 logger.debug("Setting color to RGB({},{},{})".format(r, g, b))
                 self.controller.set_color(r, g, b)
 
+            # Process progress BEFORE effect so that set_effect can snap to it
+            if "progress" in command:
+                progress = command["progress"]
+                logger.debug("Setting progress to {}".format(progress))
+                self.controller.set_progress(progress)
+
             if "effect" in command:
                 effect = command["effect"]
                 speed = command.get("speed", 50)
