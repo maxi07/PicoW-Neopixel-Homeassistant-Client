@@ -1080,6 +1080,13 @@ class NeoPixelController:
 
     def get_state(self):
         """Get current state for reporting to Home Assistant"""
+        import gc
+
+        diagnostics = {
+            "estimated_current_ma": self.get_estimated_current_ma(),
+            "free_memory": gc.mem_free(),
+        }
+
         # During one-shot, report the saved (persistent) state
         if self._one_shot_active and self._saved_state:
             return {
@@ -1095,6 +1102,7 @@ class NeoPixelController:
                 "progress": self.progress_value,
                 "one_shot_active": True,
                 "one_shot_effect": self.current_effect,
+                "diagnostics": diagnostics,
             }
         return {
             "is_on": self.is_on,
@@ -1108,6 +1116,7 @@ class NeoPixelController:
             },
             "progress": self.progress_value,
             "one_shot_active": False,
+            "diagnostics": diagnostics,
         }
 
     def get_estimated_current_ma(self):

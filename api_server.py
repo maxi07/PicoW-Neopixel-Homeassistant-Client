@@ -137,6 +137,11 @@ class APIServer:
         """Handle state request"""
         try:
             state = self.controller.get_state()
+            # Add WiFi diagnostics to state if network_mgr is available
+            if self.network_mgr and "diagnostics" in state:
+                state["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
+                state["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
+                state["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
             logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{})".format(
                 state.get('is_on'),
                 state.get('brightness'),
