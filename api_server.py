@@ -142,13 +142,17 @@ class APIServer:
                 state["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
                 state["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
                 state["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
-            logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{})".format(
+            diag = state.get('diagnostics', {})
+            logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{}), current={}mA, free_mem={}, rssi={}".format(
                 state.get('is_on'),
                 state.get('brightness'),
                 state.get('effect'),
                 state.get('color', {}).get('r', 0),
                 state.get('color', {}).get('g', 0),
-                state.get('color', {}).get('b', 0)
+                state.get('color', {}).get('b', 0),
+                diag.get('estimated_current_ma'),
+                diag.get('free_memory'),
+                diag.get('wifi_rssi'),
             ))
             self._send_response(client, 200, state)
         except Exception as e:
