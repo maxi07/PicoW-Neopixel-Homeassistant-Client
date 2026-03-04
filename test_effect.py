@@ -10,7 +10,7 @@ from config_loader import Config
 from neopixel_controller import NeoPixelController
 
 # ── Settings ────────────────────────────────────────────
-EFFECT = NeoPixelController.EFFECT_FILL_OUTSIDE_IN   # Effect to test
+EFFECT = NeoPixelController.EFFECT_FILL_MIDDLE_OUT   # Effect to test
 BRIGHTNESS = 50                               # 0-100
 SPEED = 50                                    # 1-100
 COLOR = (255, 0, 0)                           # RGB color (used by chase, breathing, scanner, twinkle, strobe)
@@ -39,10 +39,10 @@ print("Effect '{}' playing once (brightness={}, speed={})...".format(EFFECT, BRI
 while np._one_shot_active:
     time.sleep_ms(50)
 
-print("Done. Turning off.")
+print("Done.")
 
 # Clean up
-np.turn_off()
+#np.turn_off()
 time.sleep_ms(100)   # let Core 1 clear the strip
 np.stop_animation_loop()
 time.sleep_ms(100)

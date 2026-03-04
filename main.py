@@ -142,9 +142,20 @@ def main():
         # Cleanup
         logger.info("Shutting down...")
 
+        # Turn off LEDs first while animation loop is still running
+        try:
+            if neopixel and not neopixel.current_color == neopixel.COLOR_ERROR:
+                neopixel.turn_off()
+                time.sleep_ms(100)  # Let Core 1 clear the strip
+            else:
+                logger.info("Keeping error status LEDs on")
+        except Exception as e:
+            logger.error("Error turning off LEDs: {}".format(e))
+
         try:
             if neopixel:
                 neopixel.stop_animation_loop()
+                time.sleep_ms(100)
         except Exception as e:
             logger.error("Error stopping animation loop: {}".format(e))
 
@@ -159,15 +170,6 @@ def main():
                 network_mgr.disconnect()
         except Exception as e:
             logger.error("Error disconnecting network: {}".format(e))
-
-        # Only turn off LEDs if not already showing an error status
-        try:
-            if neopixel and not neopixel.current_color == neopixel.COLOR_ERROR:
-                neopixel.turn_off()
-            else:
-                logger.info("Keeping error status LEDs on")
-        except Exception as e:
-            logger.error("Error turning off LEDs: {}".format(e))
 
         logger.info("Shutdown complete")
 

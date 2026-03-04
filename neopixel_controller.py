@@ -31,6 +31,9 @@ class NeoPixelController:
     EFFECT_FILL_OUTSIDE_IN = "fill_outside_in"      # Turn on from edges inward
     EFFECT_UNFILL_MIDDLE_OUT = "unfill_middle_out"  # Turn off from center outward
     EFFECT_UNFILL_OUTSIDE_IN = "unfill_outside_in"  # Turn off from edges inward
+    EFFECT_TRANSITION_MIDDLE_OUT = "transition_middle_out"  # Color transition from center
+    EFFECT_TRANSITION_OUTSIDE_IN = "transition_outside_in"  # Color transition from edges
+    EFFECT_TRANSITION_FADE = "transition_fade"              # Smooth color crossfade
 
     # Status colors
     COLOR_BOOT = (255, 165, 0)      # Orange - Boot animation
@@ -73,6 +76,9 @@ class NeoPixelController:
             self._one_shot_active = False
             self._one_shot_steps_remaining = 0
             self._saved_state = None
+
+            # Transition effect state
+            self._transition_from_color = self.COLOR_OFF
 
             logger.info("NeoPixel initialized: {} LEDs on pin {} with brightness {}%".format(num_leds, pin, self.brightness))
 
@@ -236,6 +242,12 @@ class NeoPixelController:
                 self._effect_unfill_middle_out()
             elif self.current_effect == self.EFFECT_UNFILL_OUTSIDE_IN:
                 self._effect_unfill_outside_in()
+            elif self.current_effect == self.EFFECT_TRANSITION_MIDDLE_OUT:
+                self._effect_transition_middle_out()
+            elif self.current_effect == self.EFFECT_TRANSITION_OUTSIDE_IN:
+                self._effect_transition_outside_in()
+            elif self.current_effect == self.EFFECT_TRANSITION_FADE:
+                self._effect_transition_fade()
         except Exception as e:
             logger.error("Effect render failed: {}".format(e))
 
@@ -391,6 +403,15 @@ class NeoPixelController:
         elif effect == self.EFFECT_UNFILL_OUTSIDE_IN:
             # Unfill from edges to center - half strip distance
             return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_TRANSITION_MIDDLE_OUT:
+            # Transition from center to edges - half strip distance
+            return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_TRANSITION_OUTSIDE_IN:
+            # Transition from edges to center - half strip distance
+            return (self.num_leds + 1) // 2
+        elif effect == self.EFFECT_TRANSITION_FADE:
+            # Smooth crossfade — 64 steps for a nice blend
+            return 64
         return 100  # Fallback
 
     def play_once(self, effect, speed=50, color=None):
@@ -409,6 +430,10 @@ class NeoPixelController:
                     'update_interval': self.update_interval,
                     'step_size': self.step_size,
                 }
+
+            # For transition effects, save the current color as "from" color
+            if effect in (self.EFFECT_TRANSITION_MIDDLE_OUT, self.EFFECT_TRANSITION_OUTSIDE_IN, self.EFFECT_TRANSITION_FADE):
+                self._transition_from_color = self.current_color
 
             # Configure one-shot effect
             self.is_on = True
@@ -430,25 +455,62 @@ class NeoPixelController:
         except Exception as e:
             logger.error("Failed to start one-shot: {}".format(e))
 
-    def _restore_state(self):
-        """Restore state after one-shot animation completes."""
-        try:
-            if self._saved_state:
-                self.is_on = self._saved_state['is_on']
-                self.current_effect = self._saved_state['effect']
-                self.current_color = self._saved_state['color']
-                self.effect_color = self._saved_state['effect_color']
-                self.brightness = self._saved_state['brightness']
-                self.effect_speed = self._saved_state['effect_speed']
-                self._speed_inc = self._saved_state['_speed_inc']
-                self.update_interval = self._saved_state['update_interval']
-                self.step_size = self._saved_state['step_size']
-                self._saved_state = None
+    # Effects whose end state is "all LEDs lit in the effect color"
+    FILL_EFFECTS = {EFFECT_FILL_MIDDLE_OUT, EFFECT_FILL_OUTSIDE_IN,
+                    EFFECT_TRANSITION_MIDDLE_OUT, EFFECT_TRANSITION_OUTSIDE_IN,
+                    EFFECT_TRANSITION_FADE}
+    # Effects whose end state is "all LEDs off"
+    UNFILL_EFFECTS = {EFFECT_UNFILL_MIDDLE_OUT, EFFECT_UNFILL_OUTSIDE_IN}
 
+    def _restore_state(self):
+        """Determine end state after one-shot animation based on effect type.
+
+        - Fill effects   → switch to static with the effect color (LEDs stay on)
+        - Unfill effects → turn off (LEDs stay dark)
+        - All others     → restore to the state before the one-shot started
+        """
+        try:
+            finished_effect = self.current_effect
+
+            if finished_effect in self.FILL_EFFECTS:
+                # LEDs are fully lit → stay on as static in the effect color
+                one_shot_color = self.effect_color
+                if self._saved_state:
+                    self.brightness = self._saved_state['brightness']
+                self.is_on = True
+                self.current_effect = self.EFFECT_STATIC
+                self.current_color = one_shot_color
+                self.effect_color = one_shot_color
+                self._needs_refresh = True
+                logger.info("One-shot complete (fill), static with color {}".format(one_shot_color))
+
+            elif finished_effect in self.UNFILL_EFFECTS:
+                # LEDs are all off → stay off
+                if self._saved_state:
+                    self.brightness = self._saved_state['brightness']
+                self.is_on = False
+                self.current_effect = self.EFFECT_STATIC
+                self._needs_refresh = True
+                logger.info("One-shot complete (unfill), LEDs off")
+
+            else:
+                # All other effects → restore previous state completely
+                if self._saved_state:
+                    self.is_on = self._saved_state['is_on']
+                    self.current_effect = self._saved_state['effect']
+                    self.current_color = self._saved_state['color']
+                    self.effect_color = self._saved_state['effect_color']
+                    self.brightness = self._saved_state['brightness']
+                    self.effect_speed = self._saved_state['effect_speed']
+                    self._speed_inc = self._saved_state['_speed_inc']
+                    self.update_interval = self._saved_state['update_interval']
+                    self.step_size = self._saved_state['step_size']
+                self._needs_refresh = True
+                logger.info("One-shot complete, state restored")
+
+            self._saved_state = None
             self._one_shot_active = False
             self._one_shot_steps_remaining = 0
-            self._needs_refresh = True
-            logger.info("One-shot complete, state restored")
         except Exception as e:
             logger.error("Failed to restore state: {}".format(e))
 
@@ -803,6 +865,68 @@ class NeoPixelController:
             else:
                 self.strip[i] = color
 
+        self._show()
+
+    def _effect_transition_middle_out(self):
+        """Transition effect: Color changes from center outward.
+
+        LEDs near the center switch to the new color first,
+        spreading outward to the edges.
+        """
+        pos_f = self._effect_pos_f
+        center = (self.num_leds - 1) / 2.0
+        new_color = self._apply_brightness(self.effect_color)
+        old_color = self._apply_brightness(self._transition_from_color)
+
+        for i in range(self.num_leds):
+            dist_from_center = abs(i - center)
+            if dist_from_center <= pos_f:
+                self.strip[i] = new_color
+            else:
+                self.strip[i] = old_color
+
+        self._show()
+
+    def _effect_transition_outside_in(self):
+        """Transition effect: Color changes from edges inward to center.
+
+        LEDs at the edges switch to the new color first,
+        spreading inward to the center.
+        """
+        pos_f = self._effect_pos_f
+        new_color = self._apply_brightness(self.effect_color)
+        old_color = self._apply_brightness(self._transition_from_color)
+
+        for i in range(self.num_leds):
+            dist_from_edge = min(i, self.num_leds - 1 - i)
+            if dist_from_edge <= pos_f:
+                self.strip[i] = new_color
+            else:
+                self.strip[i] = old_color
+
+        self._show()
+
+    def _effect_transition_fade(self):
+        """Transition effect: Smooth crossfade from old to new color.
+
+        All LEDs blend simultaneously. pos_f goes from 0 to 64.
+        At 0: fully old color. At 64: fully new color.
+        """
+        pos_f = self._effect_pos_f
+        total = 64.0
+        t = max(0.0, min(1.0, pos_f / total))  # blend factor 0.0 → 1.0
+
+        br = self.brightness / 100.0
+        or_, og, ob = self._transition_from_color
+        nr, ng, nb = self.effect_color
+
+        # Interpolate between old and new color
+        r = int((or_ + (nr - or_) * t) * br)
+        g = int((og + (ng - og) * t) * br)
+        b = int((ob + (nb - ob) * t) * br)
+
+        for i in range(self.num_leds):
+            self.strip[i] = (r, g, b)
         self._show()
 
     def _hsv_to_rgb(self, h, s, v):
