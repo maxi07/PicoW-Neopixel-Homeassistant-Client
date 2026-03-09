@@ -41,7 +41,7 @@ def main():
 
         # Show boot animation
         logger.info("Running boot animation...")
-        neopixel.show_status("boot")
+        # neopixel.show_status("boot")
 
         # Initialize network manager
         logger.info("Initializing network...")
@@ -55,11 +55,22 @@ def main():
 
         network_mgr = NetworkManager(ssid, password)
 
-        # Connect to WiFi
-        if not network_mgr.connect(neopixel):
+        # Start animation loop on Core 1 and show WiFi connecting animation
+        neopixel.set_effect(neopixel.EFFECT_BREATHING, speed=50)
+        neopixel.set_color_only(neopixel.COLOR_WIFI_CONNECTING)
+        neopixel.start_animation_loop()
+
+        # Connect to WiFi (breathing blue runs on Core 1)
+        if not network_mgr.connect():
             logger.error("Failed to connect to WiFi")
+            neopixel.stop_animation_loop()
+            time.sleep(0.5)
             neopixel.show_status("error")
+            time.sleep(10)  # Show error for 10 seconds
             return
+
+        # WiFi connected - show ready
+        neopixel.show_status("ready")
 
         # Get device info
         device_info = {
@@ -76,7 +87,7 @@ def main():
         # Initialize API server
         logger.info("Starting API server...")
         api_port = int(config.get("api", "port") or 80)
-        api_server = APIServer(neopixel, device_info, api_port)
+        api_server = APIServer(neopixel, device_info, api_port, network_mgr)
 
         if not api_server.start():
             logger.error("Failed to start API server")
@@ -87,16 +98,13 @@ def main():
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
 
-        # Main event loop
+        # Main event loop (Core 0: API + Network)
         loop_counter = 0
         last_gc = time.ticks_ms()
 
         while True:
             try:
-                # Update NeoPixel animations (non-blocking)
-                neopixel.update()
-
-                # Handle API requests (non-blocking)
+                # Handle API requests (Core 0)
                 api_server.handle_requests()
 
                 # Check network connection (periodic)
@@ -112,8 +120,8 @@ def main():
 
                 loop_counter += 1
 
-                # Small delay to prevent CPU overload
-                time.sleep(0.001)
+                # Yield CPU — animations run independently on Core 1
+                time.sleep(0.01)
 
             except KeyboardInterrupt:
                 logger.info("Keyboard interrupt received")
@@ -134,6 +142,23 @@ def main():
         # Cleanup
         logger.info("Shutting down...")
 
+        # Turn off LEDs first while animation loop is still running
+        try:
+            if neopixel and not neopixel.current_color == neopixel.COLOR_ERROR:
+                neopixel.turn_off()
+                time.sleep_ms(100)  # Let Core 1 clear the strip
+            else:
+                logger.info("Keeping error status LEDs on")
+        except Exception as e:
+            logger.error("Error turning off LEDs: {}".format(e))
+
+        try:
+            if neopixel:
+                neopixel.stop_animation_loop()
+                time.sleep_ms(100)
+        except Exception as e:
+            logger.error("Error stopping animation loop: {}".format(e))
+
         try:
             if api_server:
                 api_server.stop()
@@ -145,12 +170,6 @@ def main():
                 network_mgr.disconnect()
         except Exception as e:
             logger.error("Error disconnecting network: {}".format(e))
-
-        try:
-            if neopixel:
-                neopixel.turn_off()
-        except Exception as e:
-            logger.error("Error turning off LEDs: {}".format(e))
 
         logger.info("Shutdown complete")
 

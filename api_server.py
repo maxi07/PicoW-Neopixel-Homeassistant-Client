@@ -10,11 +10,12 @@ logger = Logger("API")
 
 
 class APIServer:
-    def __init__(self, neopixel_controller, device_info, port=80):
+    def __init__(self, neopixel_controller, device_info, port=80, network_mgr=None):
         """Initialize API server"""
         self.controller = neopixel_controller
         self.device_info = device_info
         self.port = port
+        self.network_mgr = network_mgr
         self.socket = None
         self.running = False
 
@@ -136,13 +137,22 @@ class APIServer:
         """Handle state request"""
         try:
             state = self.controller.get_state()
-            logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{})".format(
+            # Add WiFi diagnostics to state if network_mgr is available
+            if self.network_mgr and "diagnostics" in state:
+                state["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
+                state["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
+                state["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
+            diag = state.get('diagnostics', {})
+            logger.debug("Returning state: is_on={}, brightness={}, effect={}, color=({},{},{}), current={}mA, free_mem={}, rssi={}".format(
                 state.get('is_on'),
                 state.get('brightness'),
                 state.get('effect'),
                 state.get('color', {}).get('r', 0),
                 state.get('color', {}).get('g', 0),
-                state.get('color', {}).get('b', 0)
+                state.get('color', {}).get('b', 0),
+                diag.get('estimated_current_ma'),
+                diag.get('free_memory'),
+                diag.get('wifi_rssi'),
             ))
             self._send_response(client, 200, state)
         except Exception as e:
@@ -151,6 +161,7 @@ class APIServer:
 
     def _handle_get_info(self, client):
         """Handle device info request"""
+        import gc
         info = {
             "device": self.device_info,
             "capabilities": {
@@ -160,9 +171,19 @@ class APIServer:
                 ],
                 "num_leds": self.controller.num_leds,
                 "supports_rgb": True,
-                "supports_brightness": True
+                "supports_brightness": True,
+                "supports_play_once": True
+            },
+            "diagnostics": {
+                "estimated_current_ma": self.controller.get_estimated_current_ma(),
+                "free_memory": gc.mem_free(),
             }
         }
+        # Add WiFi diagnostics if network_mgr is available
+        if self.network_mgr:
+            info["diagnostics"]["wifi_rssi"] = self.network_mgr.get_rssi()
+            info["diagnostics"]["wifi_signal_percent"] = self.network_mgr.get_signal_percent()
+            info["diagnostics"]["wifi_channel"] = self.network_mgr.get_channel()
         logger.debug("Returning device info: name={}, id={}, num_leds={}".format(
             self.device_info.get('name'),
             self.device_info.get('id'),
@@ -181,6 +202,20 @@ class APIServer:
             command = json.loads(body)
             logger.debug("Control command received: {}".format(json.dumps(command)))
 
+            # Handle one-shot animation (exclusive — returns immediately)
+            if "play_once" in command:
+                effect = command["play_once"]
+                speed = command.get("speed", 50)
+                color = command.get("color", None)
+                color_tuple = None
+                if color:
+                    color_tuple = (color.get("r", 255), color.get("g", 0), color.get("b", 0))
+                logger.debug("Playing one-shot: {} (speed: {})".format(effect, speed))
+                self.controller.play_once(effect, speed, color_tuple)
+                state = self.controller.get_state()
+                self._send_response(client, 200, {"success": True, "state": state})
+                return
+
             # Process command
             if "power" in command:
                 if command["power"] == "on":
@@ -195,6 +230,11 @@ class APIServer:
                 logger.debug("Setting brightness to {}".format(brightness))
                 self.controller.set_brightness(brightness)
 
+            if "speed" in command and "effect" not in command:
+                speed = command["speed"]
+                logger.debug("Setting animation speed to {}".format(speed))
+                self.controller.set_speed(speed)
+
             if "color" in command and "effect" not in command:
                 color = command["color"]
                 r = color.get("r", 0)
@@ -202,6 +242,12 @@ class APIServer:
                 b = color.get("b", 0)
                 logger.debug("Setting color to RGB({},{},{})".format(r, g, b))
                 self.controller.set_color(r, g, b)
+
+            # Process progress BEFORE effect so that set_effect can snap to it
+            if "progress" in command:
+                progress = command["progress"]
+                logger.debug("Setting progress to {}".format(progress))
+                self.controller.set_progress(progress)
 
             if "effect" in command:
                 effect = command["effect"]
