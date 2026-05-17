@@ -254,6 +254,18 @@ class MDNSResponder:
         self._last_announce = time.ticks_ms()
         logger.debug("mDNS announcement sent")
 
+    def update_ip(self, new_ip):
+        """Update the advertised IP address and re-announce immediately.
+
+        Call this whenever DHCP assigns a new address after a reconnect so
+        that the A record stays accurate without restarting the responder.
+        """
+        if new_ip == self.ip:
+            return
+        self.ip = new_ip
+        logger.info("mDNS IP updated to {}".format(new_ip))
+        self.announce()
+
     # ------------------------------------------------------------------
     # Packet building
     # ------------------------------------------------------------------

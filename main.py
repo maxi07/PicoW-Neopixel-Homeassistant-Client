@@ -15,6 +15,22 @@ from version import VERSION
 # Initialize logger
 logger = Logger("Main")
 
+_DEFAULT_MDNS_HOSTNAME = "picow-neopixel"
+
+
+def _sanitize_mdns_hostname(device_id):
+    """Convert a device ID to a valid DNS hostname label (RFC 1123).
+
+    Replaces underscores with hyphens, strips any character that is not
+    [a-z0-9-], strips leading/trailing hyphens, and trims to 63 characters.
+    The original device ID is preserved unchanged in the TXT record so
+    discovery still maps back to the configured device.
+    """
+    hostname = device_id.replace("_", "-").lower()
+    hostname = "".join(c for c in hostname if c in "abcdefghijklmnopqrstuvwxyz0123456789-")
+    hostname = hostname.strip("-")
+    return hostname[:63] or _DEFAULT_MDNS_HOSTNAME
+
 
 def main():
     """Main application entry point"""
@@ -100,8 +116,9 @@ def main():
         # Advertise the device over mDNS / DNS-SD so the Home Assistant
         # integration can discover it without scanning the LAN.
         try:
+            mdns_hostname = _sanitize_mdns_hostname(device_info["id"])
             mdns = MDNSResponder(
-                hostname=device_info["id"],
+                hostname=mdns_hostname,
                 instance_name=device_info["name"],
                 service_type="_picow-neopixel._tcp.local.",
                 port=api_port,
@@ -126,6 +143,7 @@ def main():
         # Main event loop (Core 0: API + Network)
         loop_counter = 0
         last_gc = time.ticks_ms()
+        last_mdns_ip = device_info["ip"]
 
         while True:
             try:
@@ -135,6 +153,13 @@ def main():
                 # Service the mDNS responder (non-blocking)
                 if mdns:
                     mdns.poll()
+                    # Keep mDNS A record in sync if DHCP assigned a new IP
+                    current_ip = network_mgr.get_ip()
+                    if current_ip and current_ip != last_mdns_ip:
+                        logger.info("IP changed {} -> {}, updating mDNS".format(
+                            last_mdns_ip, current_ip))
+                        mdns.update_ip(current_ip)
+                        last_mdns_ip = current_ip
 
                 # Check network connection (periodic)
                 network_mgr.check_connection()
