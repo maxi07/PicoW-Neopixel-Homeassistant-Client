@@ -9,22 +9,41 @@ from config_loader import Config
 from neopixel_controller import NeoPixelController
 from network_manager import NetworkManager
 from api_server import APIServer
+from mdns_service import MDNSResponder
+from version import VERSION
 
 # Initialize logger
 logger = Logger("Main")
+
+_DEFAULT_MDNS_HOSTNAME = "picow-neopixel"
+
+
+def _sanitize_mdns_hostname(device_id):
+    """Convert a device ID to a valid DNS hostname label (RFC 1123).
+
+    Replaces underscores with hyphens, strips any character that is not
+    [a-z0-9-], strips leading/trailing hyphens, and trims to 63 characters.
+    The original device ID is preserved unchanged in the TXT record so
+    discovery still maps back to the configured device.
+    """
+    hostname = device_id.replace("_", "-").lower()
+    hostname = "".join(c for c in hostname if c in "abcdefghijklmnopqrstuvwxyz0123456789-")
+    hostname = hostname.strip("-")
+    return hostname[:63] or _DEFAULT_MDNS_HOSTNAME
 
 
 def main():
     """Main application entry point"""
     logger.info("="*50)
     logger.info("PicoW NeoPixel Controller Starting")
-    logger.info("Version: 1.0")
+    logger.info("Version: {}".format(VERSION))
     logger.info("="*50)
 
     # Initialize components
     neopixel = None
     network_mgr = None
     api_server = None
+    mdns = None
 
     try:
         # Load configuration
@@ -94,6 +113,29 @@ def main():
             neopixel.show_status("error")
             return
 
+        # Advertise the device over mDNS / DNS-SD so the Home Assistant
+        # integration can discover it without scanning the LAN.
+        try:
+            mdns_hostname = _sanitize_mdns_hostname(device_info["id"])
+            mdns = MDNSResponder(
+                hostname=mdns_hostname,
+                instance_name=device_info["name"],
+                service_type="_picow-neopixel._tcp.local.",
+                port=api_port,
+                ip=device_info["ip"],
+                txt_records={
+                    "id": device_info["id"],
+                    "name": device_info["name"],
+                    "version": VERSION,
+                    "path": "/info",
+                },
+            )
+            if not mdns.start():
+                mdns = None
+        except Exception as e:
+            logger.error("Failed to initialize mDNS responder: {}".format(e))
+            mdns = None
+
         logger.info("="*50)
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
@@ -101,11 +143,23 @@ def main():
         # Main event loop (Core 0: API + Network)
         loop_counter = 0
         last_gc = time.ticks_ms()
+        last_mdns_ip = device_info["ip"]
 
         while True:
             try:
                 # Handle API requests (Core 0)
                 api_server.handle_requests()
+
+                # Service the mDNS responder (non-blocking)
+                if mdns:
+                    mdns.poll()
+                    # Keep mDNS A record in sync if DHCP assigned a new IP
+                    current_ip = network_mgr.get_ip()
+                    if current_ip and current_ip != last_mdns_ip:
+                        logger.info("IP changed {} -> {}, updating mDNS".format(
+                            last_mdns_ip, current_ip))
+                        mdns.update_ip(current_ip)
+                        last_mdns_ip = current_ip
 
                 # Check network connection (periodic)
                 network_mgr.check_connection()
@@ -164,6 +218,12 @@ def main():
                 api_server.stop()
         except Exception as e:
             logger.error("Error stopping API server: {}".format(e))
+
+        try:
+            if mdns:
+                mdns.stop()
+        except Exception as e:
+            logger.error("Error stopping mDNS responder: {}".format(e))
 
         try:
             if network_mgr:

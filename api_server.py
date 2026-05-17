@@ -5,6 +5,7 @@ Provides HTTP endpoints for controlling the LED strip
 import socket
 import json
 from logger import Logger
+from version import VERSION
 
 logger = Logger("API")
 
@@ -128,7 +129,7 @@ class APIServer:
         response = {
             "device": self.device_info["name"],
             "id": self.device_info["id"],
-            "version": "1.0",
+            "version": VERSION,
             "endpoints": ["/", "/state", "/info", "/control"]
         }
         self._send_response(client, 200, response)
@@ -164,6 +165,7 @@ class APIServer:
         import gc
         info = {
             "device": self.device_info,
+            "version": VERSION,
             "capabilities": {
                 "effects": [
                     "static", "rainbow", "fade", "chase",

@@ -6,6 +6,7 @@ MicroPython-based NeoPixel LED controller for Raspberry Pi Pico W with REST API 
 
 - **Non-blocking Animation Engine**: All effects run without blocking command reception
 - **REST API**: Full HTTP REST API for remote control
+- **mDNS / Zeroconf Discovery**: Advertises `_picow-neopixel._tcp.local.` so Home Assistant discovers the device automatically — no LAN scanning needed
 - **Auto-reconnect**: Automatic WiFi reconnection on connection loss
 - **Status Indicators**: Visual feedback for boot, WiFi connecting, errors, and ready states
 - **Multiple Effects**: 8 built-in LED effects (rainbow, fade, chase, breathing, twinkle, scanner, strobe, static)
