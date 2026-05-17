@@ -9,6 +9,8 @@ from config_loader import Config
 from neopixel_controller import NeoPixelController
 from network_manager import NetworkManager
 from api_server import APIServer
+from mdns_service import MDNSResponder
+from version import VERSION
 
 # Initialize logger
 logger = Logger("Main")
@@ -18,13 +20,14 @@ def main():
     """Main application entry point"""
     logger.info("="*50)
     logger.info("PicoW NeoPixel Controller Starting")
-    logger.info("Version: 1.0")
+    logger.info("Version: {}".format(VERSION))
     logger.info("="*50)
 
     # Initialize components
     neopixel = None
     network_mgr = None
     api_server = None
+    mdns = None
 
     try:
         # Load configuration
@@ -94,6 +97,28 @@ def main():
             neopixel.show_status("error")
             return
 
+        # Advertise the device over mDNS / DNS-SD so the Home Assistant
+        # integration can discover it without scanning the LAN.
+        try:
+            mdns = MDNSResponder(
+                hostname=device_info["id"],
+                instance_name=device_info["name"],
+                service_type="_picow-neopixel._tcp.local.",
+                port=api_port,
+                ip=device_info["ip"],
+                txt_records={
+                    "id": device_info["id"],
+                    "name": device_info["name"],
+                    "version": VERSION,
+                    "path": "/info",
+                },
+            )
+            if not mdns.start():
+                mdns = None
+        except Exception as e:
+            logger.error("Failed to initialize mDNS responder: {}".format(e))
+            mdns = None
+
         logger.info("="*50)
         logger.info("System ready! Waiting for commands...")
         logger.info("="*50)
@@ -106,6 +131,10 @@ def main():
             try:
                 # Handle API requests (Core 0)
                 api_server.handle_requests()
+
+                # Service the mDNS responder (non-blocking)
+                if mdns:
+                    mdns.poll()
 
                 # Check network connection (periodic)
                 network_mgr.check_connection()
@@ -164,6 +193,12 @@ def main():
                 api_server.stop()
         except Exception as e:
             logger.error("Error stopping API server: {}".format(e))
+
+        try:
+            if mdns:
+                mdns.stop()
+        except Exception as e:
+            logger.error("Error stopping mDNS responder: {}".format(e))
 
         try:
             if network_mgr:
