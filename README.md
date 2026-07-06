@@ -270,6 +270,11 @@ The integration is available in the **[HACS](https://hacs.xyz/) default reposito
 
 👉 Repository: [maxi07/PicoW-Neopixel-Homeassistant-Integration](https://github.com/maxi07/PicoW-Neopixel-Homeassistant-Integration)
 
+### More about this project
+
+- 🗂️ **Project page:** [maexbert.de/projekte/homeassistant-led](https://maexbert.de/projekte/homeassistant-led)
+- 📖 **Blog article:** [PicoW NeoPixel is now available in HACS](https://maexbert.de/blog/2026-07-06-picow-neopixel-hacs-verfuegbar) — the story behind the HACS default listing.
+
 ## License
 
 MIT License - feel free to modify and use for your projects.
