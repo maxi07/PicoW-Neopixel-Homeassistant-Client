@@ -2,6 +2,17 @@
 
 MicroPython-based NeoPixel LED controller for Raspberry Pi Pico W with REST API and Home Assistant integration support.
 
+## 🧩 Part of a two-repository project
+
+This firmware is the **device side** of the project. It runs on the Pico W, drives the LEDs and serves a REST API that the Home Assistant integration talks to:
+
+| Repository | Role | Language |
+|---|---|---|
+| **PicoW-Neopixel-Homeassistant-Client** (this repo) | MicroPython firmware for the Pico W — drives the LEDs and serves the REST API | MicroPython |
+| [**PicoW-Neopixel-Homeassistant-Integration**](https://github.com/maxi07/PicoW-Neopixel-Homeassistant-Integration) | Home Assistant custom integration — discovers the device and exposes it as a light entity | Python |
+
+👉 **You need both:** flash this firmware onto your Pico W, then install the [Home Assistant integration](https://github.com/maxi07/PicoW-Neopixel-Homeassistant-Integration) — now available directly in [HACS](https://hacs.xyz/).
+
 ## Features
 
 - **Non-blocking Animation Engine**: All effects run without blocking command reception
@@ -251,7 +262,18 @@ View logs via serial connection or read logs.txt from the device.
 
 ## Home Assistant Integration
 
-This controller is designed to work with the PicoW NeoPixel Home Assistant Integration. The integration will automatically discover devices on your network and allow control through the Home Assistant UI.
+This controller is designed to work hand-in-hand with the **[PicoW NeoPixel Home Assistant Integration](https://github.com/maxi07/PicoW-Neopixel-Homeassistant-Integration)**.
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
+
+The integration is available in the **[HACS](https://hacs.xyz/) default repositories** — just search for **PicoW NeoPixel** in HACS, install it, and restart Home Assistant. Thanks to the mDNS advertisement (`_picow-neopixel._tcp.local.`) built into this firmware, Home Assistant discovers the device automatically and exposes it as a light entity — no LAN scanning required.
+
+👉 Repository: [maxi07/PicoW-Neopixel-Homeassistant-Integration](https://github.com/maxi07/PicoW-Neopixel-Homeassistant-Integration)
+
+### More about this project
+
+- 🗂️ **Project page:** [maexbert.de/projekte/homeassistant-led](https://maexbert.de/projekte/homeassistant-led)
+- 📖 **Blog article:** [PicoW NeoPixel is now available in HACS](https://maexbert.de/blog/2026-07-06-picow-neopixel-hacs-verfuegbar) — the story behind the HACS default listing.
 
 ## License
 
