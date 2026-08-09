@@ -21,9 +21,10 @@ DURATION_SECONDS = 10                         # How long to loop the animation
 config = Config()
 pin = int(config.get("neopixel", "pin") or 28)
 num_leds = int(config.get("neopixel", "num_leds") or 121)
+rgbw = config.get("neopixel", "rgbw", False) is True
 
 # Init controller
-np = NeoPixelController(pin, num_leds, brightness=BRIGHTNESS)
+np = NeoPixelController(pin, num_leds, brightness=BRIGHTNESS, rgbw=rgbw)
 
 # Start the animation loop on Core 1
 np.start_animation_loop()

@@ -14,6 +14,36 @@ from logger import Logger
 logger = Logger("NeoPixel")
 
 
+class _RGBWStrip:
+    """Expose an RGB interface while driving a four-channel RGBW strip."""
+
+    def __init__(self, strip):
+        self._strip = strip
+
+    def __getitem__(self, index):
+        red, green, blue, white = self._strip[index]
+        return (
+            min(255, red + white),
+            min(255, green + white),
+            min(255, blue + white),
+        )
+
+    def __setitem__(self, index, color):
+        red = color[0]
+        green = color[1]
+        blue = color[2]
+        white = min(red, green, blue)
+        self._strip[index] = (
+            red - white,
+            green - white,
+            blue - white,
+            white,
+        )
+
+    def write(self):
+        self._strip.write()
+
+
 class NeoPixelController:
     # Effect types
     EFFECT_STATIC = "static"
@@ -43,12 +73,14 @@ class NeoPixelController:
     COLOR_READY = (255, 255, 255)   # White - Ready
     COLOR_OFF = (0, 0, 0)           # Off
 
-    def __init__(self, pin, num_leds, brightness=100):
+    def __init__(self, pin, num_leds, brightness=100, rgbw=False):
         """Initialize NeoPixel controller"""
         try:
             self.pin = Pin(pin, Pin.OUT)
             self.num_leds = num_leds
-            self.strip = NeoPixel(self.pin, num_leds)
+            self.rgbw = bool(rgbw)
+            raw_strip = NeoPixel(self.pin, num_leds, bpp=4 if self.rgbw else 3)
+            self.strip = _RGBWStrip(raw_strip) if self.rgbw else raw_strip
             self.brightness = max(0, min(100, brightness))
 
             # Current state
@@ -86,7 +118,8 @@ class NeoPixelController:
             # Transition effect state
             self._transition_from_color = self.COLOR_OFF
 
-            logger.info("NeoPixel initialized: {} LEDs on pin {} with brightness {}%".format(num_leds, pin, self.brightness))
+            logger.info("NeoPixel initialized: {} {} LEDs on pin {} with brightness {}%".format(
+                num_leds, "RGBW" if self.rgbw else "RGB", pin, self.brightness))
 
         except Exception as e:
             logger.error("Failed to initialize NeoPixel: {}".format(e))

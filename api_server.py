@@ -173,6 +173,7 @@ class APIServer:
                 ],
                 "num_leds": self.controller.num_leds,
                 "supports_rgb": True,
+                "supports_rgbw": self.controller.rgbw,
                 "supports_brightness": True,
                 "supports_play_once": True
             },

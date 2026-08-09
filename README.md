@@ -98,7 +98,8 @@ Edit `config.json` on the Pico W with your settings:
     "neopixel": {
         "pin": 28,
         "num_leds": 64,
-        "brightness": 100
+        "brightness": 100,
+        "rgbw": false
     },
     "api": {
         "port": 80
@@ -114,6 +115,7 @@ Edit `config.json` on the Pico W with your settings:
 - `neopixel.pin`: GPIO pin number for LED data (default: 28)
 - `neopixel.num_leds`: Number of LEDs in your strip (default: 64)
 - `neopixel.brightness`: Default brightness 0-100 (default: 100)
+- `neopixel.rgbw`: Set to `true` for RGBW strips; shared RGB intensity is routed through the white channel (default: `false`)
 - `api.port`: HTTP API port (default: 80)
 
 ### 4. Run

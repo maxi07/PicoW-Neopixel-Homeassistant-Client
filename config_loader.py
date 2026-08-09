@@ -53,7 +53,7 @@ class Config:
         self.config = {
             "wifi": {"ssid": "", "password": ""},
             "device": {"name": "PicoW NeoPixel", "id": "picow_neopixel_001"},
-            "neopixel": {"pin": 28, "num_leds": 64, "brightness": 100},
+            "neopixel": {"pin": 28, "num_leds": 64, "brightness": 100, "rgbw": False},
             "api": {"port": 80}
         }
 
