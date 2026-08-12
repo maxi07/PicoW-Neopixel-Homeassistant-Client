@@ -55,8 +55,9 @@ def main():
         pin = int(config.get("neopixel", "pin") or 28)
         num_leds = int(config.get("neopixel", "num_leds") or 64)
         brightness = int(config.get("neopixel", "brightness") or 100)
+        rgbw = config.get("neopixel", "rgbw", False) is True
 
-        neopixel = NeoPixelController(pin, num_leds, brightness)
+        neopixel = NeoPixelController(pin, num_leds, brightness, rgbw=rgbw)
 
         # Show boot animation
         logger.info("Running boot animation...")

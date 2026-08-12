@@ -10,7 +10,8 @@
     "neopixel": {
         "pin": 28,
         "num_leds": 64,
-        "brightness": 100
+        "brightness": 100,
+        "rgbw": false
     },
     "api": {
         "port": 80
