@@ -10,6 +10,15 @@ from version import VERSION
 logger = Logger("API")
 
 
+# Keep incoming requests small on resource-constrained MicroPython devices.
+MAX_HEADER_BYTES = 2048
+MAX_BODY_BYTES = 2048
+
+
+class BadRequest(Exception):
+    """Malformed or incomplete HTTP request."""
+
+
 class APIServer:
     def __init__(self, neopixel_controller, device_info, port=80, network_mgr=None):
         """Initialize API server"""
@@ -66,26 +75,7 @@ class APIServer:
     def _handle_client(self, client):
         """Handle individual client request"""
         try:
-            # Read request
-            request = client.recv(1024).decode('utf-8')
-
-            if not request:
-                client.close()
-                return
-
-            # Parse HTTP request
-            lines = request.split('\r\n')
-            if len(lines) < 1:
-                client.close()
-                return
-
-            request_line = lines[0].split(' ')
-            if len(request_line) < 2:
-                client.close()
-                return
-
-            method = request_line[0]
-            path = request_line[1]
+            method, path, body = self._read_request(client)
 
             logger.debug("{} {}".format(method, path))
 
@@ -97,11 +87,13 @@ class APIServer:
             elif method == "GET" and path == "/info":
                 self._handle_get_info(client)
             elif method == "POST" and path.startswith("/control"):
-                body = self._extract_body(request)
                 self._handle_control(client, body)
             else:
                 self._send_response(client, 404, {"error": "Not found"})
 
+        except BadRequest as e:
+            logger.debug("Bad HTTP request: {}".format(e))
+            self._send_response(client, 400, {"error": str(e)})
         except Exception as e:
             logger.error("Client handling error: {}".format(e))
             try:
@@ -114,15 +106,63 @@ class APIServer:
             except Exception:
                 pass
 
-    def _extract_body(self, request):
-        """Extract JSON body from POST request"""
+    def _read_request(self, client):
+        """Read bounded headers and the full Content-Length body from TCP."""
+        request = bytearray()
+        separator = b"\r\n\r\n"
+        while separator not in request:
+            if len(request) >= MAX_HEADER_BYTES:
+                raise BadRequest("Headers too large")
+            chunk = client.recv(min(512, MAX_HEADER_BYTES - len(request)))
+            if not chunk:
+                raise BadRequest("Incomplete HTTP headers")
+            request.extend(chunk)
+
+        header, _, initial_body = bytes(request).partition(separator)
+        if len(header) + len(separator) > MAX_HEADER_BYTES:
+            raise BadRequest("Headers too large")
+        lines = header.split(b"\r\n")
+        request_line = lines[0].split(b" ")
+        if len(request_line) != 3:
+            raise BadRequest("Invalid HTTP request line")
         try:
-            parts = request.split('\r\n\r\n')
-            if len(parts) >= 2:
-                return parts[1]
-            return ""
-        except Exception:
-            return ""
+            method = request_line[0].decode("ascii")
+            path = request_line[1].decode("ascii")
+        except UnicodeError:
+            raise BadRequest("Invalid HTTP request line")
+
+        content_length = None
+        for line in lines[1:]:
+            name, colon, value = line.partition(b":")
+            if not colon:
+                raise BadRequest("Invalid HTTP header")
+            if name.strip().lower() == b"content-length":
+                if content_length is not None:
+                    raise BadRequest("Duplicate Content-Length")
+                value = value.strip()
+                if not value or not all(48 <= char <= 57 for char in value):
+                    raise BadRequest("Invalid Content-Length")
+                content_length = int(value)
+
+        if method == "POST" and path.startswith("/control") and content_length is None:
+            raise BadRequest("Content-Length required")
+        if content_length is None:
+            content_length = 0
+        if content_length > MAX_BODY_BYTES:
+            raise BadRequest("Body too large")
+        if len(initial_body) > content_length:
+            raise BadRequest("Unexpected body bytes")
+
+        body = bytearray(initial_body)
+        while len(body) < content_length:
+            chunk = client.recv(min(512, content_length - len(body)))
+            if not chunk:
+                raise BadRequest("Incomplete HTTP body")
+            body.extend(chunk)
+        try:
+            return method, path, body.decode("utf-8")
+        except UnicodeError:
+            raise BadRequest("Invalid UTF-8 body")
 
     def _handle_root(self, client):
         """Handle root endpoint"""
