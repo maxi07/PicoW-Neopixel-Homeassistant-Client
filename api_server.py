@@ -4,6 +4,7 @@ Provides HTTP endpoints for controlling the LED strip
 """
 import socket
 import json
+import time
 from logger import Logger
 from version import VERSION
 
@@ -13,6 +14,7 @@ logger = Logger("API")
 # Keep incoming requests small on resource-constrained MicroPython devices.
 MAX_HEADER_BYTES = 2048
 MAX_BODY_BYTES = 2048
+REQUEST_TIMEOUT_MS = 5000
 
 
 class BadRequest(Exception):
@@ -63,7 +65,7 @@ class APIServer:
             # Accept new connection (non-blocking)
             try:
                 client, addr = self.socket.accept()
-                client.settimeout(5.0)  # 5 second timeout for client operations
+                client.settimeout(REQUEST_TIMEOUT_MS / 1000.0)
                 logger.debug("Connection from {}".format(addr))
                 self._handle_client(client)
             except OSError:
@@ -106,14 +108,26 @@ class APIServer:
             except Exception:
                 pass
 
+    def _recv_request_chunk(self, client, size, deadline, part):
+        """Receive within the shared request deadline, including slow clients."""
+        remaining = time.ticks_diff(deadline, time.ticks_ms())
+        if remaining <= 0:
+            raise BadRequest("Incomplete HTTP {}".format(part))
+        try:
+            client.settimeout(remaining / 1000.0)
+            return client.recv(size)
+        except OSError:
+            raise BadRequest("Incomplete HTTP {}".format(part))
+
     def _read_request(self, client):
         """Read bounded headers and the full Content-Length body from TCP."""
+        deadline = time.ticks_add(time.ticks_ms(), REQUEST_TIMEOUT_MS)
         request = bytearray()
         separator = b"\r\n\r\n"
         while separator not in request:
             if len(request) >= MAX_HEADER_BYTES:
                 raise BadRequest("Headers too large")
-            chunk = client.recv(min(512, MAX_HEADER_BYTES - len(request)))
+            chunk = self._recv_request_chunk(client, min(512, MAX_HEADER_BYTES - len(request)), deadline, "headers")
             if not chunk:
                 raise BadRequest("Incomplete HTTP headers")
             request.extend(chunk)
@@ -155,12 +169,12 @@ class APIServer:
 
         body = bytearray(initial_body)
         while len(body) < content_length:
-            chunk = client.recv(min(512, content_length - len(body)))
+            chunk = self._recv_request_chunk(client, min(512, content_length - len(body)), deadline, "body")
             if not chunk:
                 raise BadRequest("Incomplete HTTP body")
             body.extend(chunk)
         try:
-            return method, path, body.decode("utf-8")
+            return method, path, bytes(body).decode("utf-8")
         except UnicodeError:
             raise BadRequest("Invalid UTF-8 body")
 

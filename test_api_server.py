@@ -1,6 +1,8 @@
 """Host-side regression tests for the MicroPython HTTP request reader."""
 import json
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from api_server import APIServer
 
@@ -13,11 +15,17 @@ class SocketDouble:
         self.chunks = list(chunks)
         self.sent = bytearray()
         self.closed = False
+        self.timeouts = []
+
+    def settimeout(self, seconds):
+        self.timeouts.append(seconds)
 
     def recv(self, size):
         if not self.chunks:
             return b""
         chunk = self.chunks.pop(0)
+        if isinstance(chunk, Exception):
+            raise chunk
         if len(chunk) > size:
             self.chunks.insert(0, chunk[size:])
         return chunk[:size]
@@ -50,9 +58,12 @@ class HTTPRequestTests(unittest.TestCase):
         self.controller = ControllerDouble()
         self.server = APIServer(self.controller, {"name": "test", "id": "test"})
 
-    def request(self, chunks):
+    def request(self, chunks, clock=None):
         sock = SocketDouble(chunks)
-        self.server._handle_client(sock)
+        ticks = iter(clock if clock is not None else [0] * 100)
+        clock_module = SimpleNamespace(ticks_ms=lambda: next(ticks), ticks_add=lambda start, duration: start + duration, ticks_diff=lambda end, now: end - now)
+        with patch("api_server.time", clock_module):
+            self.server._handle_client(sock)
         status, _, body = bytes(sock.sent).partition(b"\r\n\r\n")
         return status, json.loads(body), sock
 
@@ -84,6 +95,23 @@ class HTTPRequestTests(unittest.TestCase):
     def test_duplicate_content_length_rejected(self):
         status, _, _ = self.request([b"POST /control HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}"])
         self.assertIn(b"400 Bad Request", status)
+
+    def test_header_socket_timeout_returns_400(self):
+        status, response, _ = self.request([b"POST /control HTTP/1.1\r\n", OSError("timed out")])
+        self.assertIn(b"400 Bad Request", status)
+        self.assertEqual(response["error"], "Incomplete HTTP headers")
+
+    def test_body_socket_timeout_returns_400(self):
+        header = b"POST /control HTTP/1.1\r\nContent-Length: 5\r\n\r\n"
+        status, response, _ = self.request([header + b"{}", OSError("timed out")])
+        self.assertIn(b"400 Bad Request", status)
+        self.assertEqual(response["error"], "Incomplete HTTP body")
+
+    def test_slow_trickle_reaches_global_deadline(self):
+        status, response, sock = self.request([b"POST /control HTTP/1.1\r\n", b"Host: pico\r\n", b"Content-Length: 2\r\n\r\n{}"], [0, 1000, 4000, 5000])
+        self.assertIn(b"400 Bad Request", status)
+        self.assertEqual(response["error"], "Incomplete HTTP headers")
+        self.assertEqual(sock.timeouts, [4.0, 1.0])
 
     def test_get_state(self):
         status, response, _ = self.request([b"GET /state HTTP/1.1\r\nHost: pico\r\n\r\n"])
