@@ -4,6 +4,7 @@ Provides HTTP endpoints for controlling the LED strip
 """
 import socket
 import json
+import time
 from logger import Logger
 from version import VERSION
 
@@ -136,10 +137,14 @@ class APIServer:
         }
         self._send_response(client, 200, response)
 
-    def _send_all(self, client, data):
-        """Send a bounded block, including short socket writes."""
+    def _send_all(self, client, data, started):
+        """Send a bounded block within the log transfer's total time budget."""
         data = memoryview(data)
         while data:
+            remaining_ms = 5000 - time.ticks_diff(time.ticks_ms(), started)
+            if remaining_ms <= 0:
+                raise OSError("Log transfer timed out")
+            client.settimeout(remaining_ms / 1000)
             sent = client.send(data)
             if sent is None or sent <= 0:
                 raise OSError("Socket write failed")
@@ -149,6 +154,7 @@ class APIServer:
         """Stream a fixed-size snapshot of the log file with bounded RAM use."""
         log_file = None
         response_started = False
+        started = time.ticks_ms()
         try:
             # Wait for pending log writes, but never hold the lock during network I/O.
             Logger._lock.acquire()
@@ -175,13 +181,13 @@ class APIServer:
                 "Connection: close\r\n\r\n"
             ).format(size)
             response_started = True
-            self._send_all(client, headers.encode("utf-8"))
+            self._send_all(client, headers.encode("utf-8"), started)
             remaining = size
             while remaining:
                 chunk = log_file.read(min(512, remaining))
                 if not chunk:
                     raise OSError("Log file ended before snapshot was sent")
-                self._send_all(client, chunk)
+                self._send_all(client, chunk, started)
                 remaining -= len(chunk)
         except Exception as e:
             logger.error("Failed to stream logs: {}".format(e))
@@ -189,7 +195,10 @@ class APIServer:
                 self._send_response(client, 500, {"error": "Failed to read logs"})
         finally:
             if log_file is not None:
-                log_file.close()
+                try:
+                    log_file.close()
+                except Exception as e:
+                    logger.error("Failed to close log file: {}".format(e))
 
     def _handle_get_state(self, client):
         """Handle state request"""

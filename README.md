@@ -228,6 +228,10 @@ or converted to JSON. `Content-Length` is the file size at the start of the
 request; entries appended during the download are included in the next request.
 No additional log buffer or flash writes are introduced. A transfer error
 after the headers have been sent closes the connection with an incomplete body.
+Downloads have a five-second total transfer budget, including partial socket
+writes, so slow readers cannot indefinitely block other main-loop services.
+If the budget expires, the connection closes with an incomplete body; the client
+must retry the download.
 Like the other endpoints, `/logs` has no authentication; expose it only on a
 trusted network. Log files can contain diagnostic information.
 

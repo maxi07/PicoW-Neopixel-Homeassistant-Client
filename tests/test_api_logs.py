@@ -13,6 +13,10 @@ class Client:
         self.max_send = max_send
         self.output = bytearray()
         self.closed = False
+        self.timeouts = []
+
+    def settimeout(self, timeout):
+        self.timeouts.append(timeout)
 
     def recv(self, size):
         return self.request[:size]
@@ -45,6 +49,12 @@ class LogEndpointTests(unittest.TestCase):
         self.logger_patch = patch("api_server.logger", self.logger)
         self.logger_patch.start()
         self.addCleanup(self.logger_patch.stop)
+        self.clock = Mock()
+        self.clock.ticks_ms.return_value = 0
+        self.clock.ticks_diff.side_effect = lambda now, start: now - start
+        clock_patch = patch("api_server.time", self.clock)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
 
     def download(self, log_file, client=None):
         client = client or Client()
@@ -74,6 +84,63 @@ class LogEndpointTests(unittest.TestCase):
         content = b"Warning\n" * 100
         _, body = self.download(LogFile(content), Client(max_send=7))
         self.assertEqual(body, content)
+
+    def test_deadline_applies_to_partial_header_writes(self):
+        client = Client(max_send=7)
+        log_file = LogFile(b"Warning\n")
+        original_send = client.send
+
+        def slow_send(data):
+            self.clock.ticks_ms.return_value += 1000
+            return original_send(data)
+
+        client.send = slow_send
+        with patch("builtins.open", return_value=log_file):
+            self.server._handle_client(client)
+        self.assertEqual(client.timeouts, [5, 4, 3, 2, 1])
+        self.assertEqual(len(client.output), 35)
+        self.assertTrue(client.closed)
+        self.assertTrue(log_file.closed)
+        self.logger.error.assert_called_once()
+
+    def test_deadline_is_shared_across_body_chunks(self):
+        client = Client()
+        original_send = client.send
+
+        def slow_send(data):
+            self.clock.ticks_ms.return_value += 1000
+            return original_send(data)
+
+        client.send = slow_send
+        headers, body = self.download(LogFile(b"x" * 4096), client)
+        self.assertEqual(client.timeouts, [5, 4, 3, 2, 1])
+        self.assertIn(b"Content-Length: 4096", headers)
+        self.assertEqual(body, b"x" * 2048)
+        self.assertEqual(bytes(client.output).count(b"HTTP/1.1"), 1)
+        self.logger.error.assert_called_once()
+
+    def test_socket_timeout_uses_remaining_millisecond_budget(self):
+        self.clock.ticks_ms.side_effect = [0, 4999]
+        client = Client()
+        self.download(LogFile(b""), client)
+        self.assertEqual(client.timeouts, [0.001])
+
+    def test_close_error_does_not_append_second_response(self):
+        log_file = LogFile(b"Warning\n")
+        close = log_file.close
+
+        def failing_close():
+            close()
+            raise OSError("Close failed")
+
+        log_file.close = failing_close
+        client = Client()
+        _, body = self.download(log_file, client)
+        self.assertEqual(body, b"Warning\n")
+        self.assertEqual(bytes(client.output).count(b"HTTP/1.1"), 1)
+        self.logger.error.assert_called_once_with(
+            "Failed to close log file: Close failed"
+        )
 
     def test_empty_file(self):
         log_file = LogFile(b"")
