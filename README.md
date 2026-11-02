@@ -214,6 +214,23 @@ Control the LED strip. Request body examples:
 }
 ```
 
+### GET /logs
+Returns the existing `logs.txt` as `text/plain; charset=utf-8` (WARNING and
+ERROR messages by default). If no log file exists yet, returns `200 OK`
+with an empty body. File access errors return `500`.
+
+```bash
+curl http://DEVICE_IP/logs
+```
+
+The file is streamed in blocks of at most 512 bytes, not loaded into RAM
+or converted to JSON. `Content-Length` is the file size at the start of the
+request; entries appended during the download are included in the next request.
+No additional log buffer or flash writes are introduced. A transfer error
+after the headers have been sent closes the connection with an incomplete body.
+Like the other endpoints, `/logs` has no authentication; expose it only on a
+trusted network. Log files can contain diagnostic information.
+
 ## Available Effects
 
 - `static`: Solid color
@@ -234,7 +251,8 @@ Logs are written to both console and `logs.txt` file on the Pico W.
 - Console: All messages (DEBUG, INFO, WARNING, ERROR)
 - File: Only WARNING and ERROR messages
 
-View logs via serial connection or read logs.txt from the device.
+View logs via serial connection, read logs.txt from the device, or download
+the file using `GET /logs`. DEBUG and INFO messages remain console-only.
 
 ## Troubleshooting
 

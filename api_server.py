@@ -96,6 +96,8 @@ class APIServer:
                 self._handle_get_state(client)
             elif method == "GET" and path == "/info":
                 self._handle_get_info(client)
+            elif method == "GET" and path == "/logs":
+                self._handle_get_logs(client)
             elif method == "POST" and path.startswith("/control"):
                 body = self._extract_body(request)
                 self._handle_control(client, body)
@@ -130,9 +132,64 @@ class APIServer:
             "device": self.device_info["name"],
             "id": self.device_info["id"],
             "version": VERSION,
-            "endpoints": ["/", "/state", "/info", "/control"]
+            "endpoints": ["/", "/state", "/info", "/logs", "/control"]
         }
         self._send_response(client, 200, response)
+
+    def _send_all(self, client, data):
+        """Send a bounded block, including short socket writes."""
+        data = memoryview(data)
+        while data:
+            sent = client.send(data)
+            if sent is None or sent <= 0:
+                raise OSError("Socket write failed")
+            data = data[sent:]
+
+    def _handle_get_logs(self, client):
+        """Stream a fixed-size snapshot of the log file with bounded RAM use."""
+        log_file = None
+        response_started = False
+        try:
+            # Wait for pending log writes, but never hold the lock during network I/O.
+            Logger._lock.acquire()
+            try:
+                try:
+                    log_file = open(logger.log_file, "rb")
+                except OSError as e:
+                    if not e.args or e.args[0] != 2:  # ENOENT: no warnings/errors yet
+                        raise
+                size = 0
+                if log_file is not None:
+                    log_file.seek(0, 2)
+                    size = log_file.tell()
+                    log_file.seek(0)
+            finally:
+                Logger._lock.release()
+
+            headers = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain; charset=utf-8\r\n"
+                "Content-Length: {}\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Cache-Control: no-store\r\n"
+                "Connection: close\r\n\r\n"
+            ).format(size)
+            response_started = True
+            self._send_all(client, headers.encode("utf-8"))
+            remaining = size
+            while remaining:
+                chunk = log_file.read(min(512, remaining))
+                if not chunk:
+                    raise OSError("Log file ended before snapshot was sent")
+                self._send_all(client, chunk)
+                remaining -= len(chunk)
+        except Exception as e:
+            logger.error("Failed to stream logs: {}".format(e))
+            if not response_started:
+                self._send_response(client, 500, {"error": "Failed to read logs"})
+        finally:
+            if log_file is not None:
+                log_file.close()
 
     def _handle_get_state(self, client):
         """Handle state request"""
