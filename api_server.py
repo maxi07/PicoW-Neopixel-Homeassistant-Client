@@ -204,7 +204,8 @@ class APIServer:
 
             try:
                 command = json.loads(body)
-            except ValueError:
+            except ValueError as e:
+                logger.error("Invalid JSON in control request: {}".format(e))
                 self._send_response(client, 400, {"error": "Invalid JSON"})
                 return
             logger.debug("Control command received: {}".format(json.dumps(command)))

@@ -48,7 +48,9 @@ class JsonErrorTests(unittest.TestCase):
         self.server._handle_control(client, '{"power":')
         self.assertIn(b"HTTP/1.1 400 Bad Request", client.response)
         self.assertIn(b'"error": "Invalid JSON"', client.response)
-        self.assertFalse(self.errors)
+        self.assertEqual(len(self.errors), 1)
+        self.assertIn("Invalid JSON in control request:", self.errors[0])
+        self.assertNotIn('{"power":', self.errors[0])
 
     def test_unrelated_error_is_not_mislabeled_invalid_json(self):
         client = FakeClient()
