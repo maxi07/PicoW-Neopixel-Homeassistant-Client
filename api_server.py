@@ -202,7 +202,11 @@ class APIServer:
                 self._send_response(client, 400, {"error": "No body provided"})
                 return
 
-            command = json.loads(body)
+            try:
+                command = json.loads(body)
+            except ValueError:
+                self._send_response(client, 400, {"error": "Invalid JSON"})
+                return
             logger.debug("Control command received: {}".format(json.dumps(command)))
 
             # Handle one-shot animation (exclusive — returns immediately)
@@ -284,8 +288,6 @@ class APIServer:
             ))
             self._send_response(client, 200, {"success": True, "state": state})
 
-        except json.JSONDecodeError:
-            self._send_response(client, 400, {"error": "Invalid JSON"})
         except Exception as e:
             logger.error("Control error: {}".format(e))
             self._send_response(client, 500, {"error": str(e)})
